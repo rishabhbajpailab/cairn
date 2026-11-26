@@ -21,7 +21,7 @@ Each milestone should be usable on its own before the next one starts. Tick item
 - [x] **Build the Workers for `wasm32-unknown-unknown`** (`make build-workers`). Both build with `worker-build --release` and no code changes. Sizes: API 5.8 MB raw / 1.57 MB gzipped, gateway 1.1 MB / 0.35 MB.
 - [x] **Keep the cold path under the CPU limit** (ADR 0013). Free allows 10 ms of CPU per request, and runtime JSON Schema compilation alone took 30–45 ms on a new isolate's first request. Schemas are now compiled to Rust at build time (`cairn-plugins-embedded`), which brings the cold registry load to 3–4.5 ms (`make coldstart`). **Plan on the Workers Paid plan** anyway: see deploy.md § Plan and CPU limits.
 - [ ] Check real CPU time per invocation in Workers Logs after the first deploy (cold capture, cold Discord interaction, queue batch). If queue batches are heavy, consider sending messages as JSON text to skip the `serde-wasm-bindgen` conversion (that's a queue message contract change, so update docs/ingest.md).
-- [ ] `wrangler dev` end to end: capture → queue → Surreal → Hub event in the browser
+- [x] `wrangler dev` end to end (wrangler 4.168, local SurrealDB 4.0.1): `make migrate` (idempotent), then REST capture → CAPTURES queue → consumer → SurrealDB → `GET /api/v1/items/{id}` and `/api/v1/query`, plus an `item.created` event on a `/hub` WebSocket. A bad `?token=` gets 401, and the static web app and SPA fallback are served. The browser UI itself hasn't been clicked through yet.
 - [ ] **Check AI Gateway BYOK with OpenRouter.** Cloudflare's BYOK docs don't list supported providers. Things to check:
   - whether the stored key is injected for `/openrouter/...` passthrough
   - whether `AIG_BASE_URL` needs a trailing `/v1`
