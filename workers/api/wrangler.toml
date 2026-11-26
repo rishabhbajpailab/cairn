@@ -1,0 +1,62 @@
+# Cairn API Worker. Deploy: `make deploy` (gateway first, then this).
+name = "cairn-api"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-11-01"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+# Web app + plugin views.js. Only the paths below reach the Worker; everything else is
+# served as static assets (SPA fallback to index.html).
+[assets]
+directory = "../../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/ingest/*", "/integrations/*", "/hub", "/healthz"]
+
+[[durable_objects.bindings]]
+name = "SCHEDULER"
+class_name = "Scheduler"
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "Hub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Scheduler", "Hub"]
+
+# Capture spool (invariant 1) and task firings.
+[[queues.producers]]
+queue = "cairn-captures"
+binding = "CAPTURES"
+
+[[queues.producers]]
+queue = "cairn-tasks"
+binding = "TASKS"
+
+[[queues.consumers]]
+queue = "cairn-captures"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 10
+dead_letter_queue = "cairn-captures-dlq"
+
+[[queues.consumers]]
+queue = "cairn-tasks"
+max_batch_size = 1
+max_retries = 3
+dead_letter_queue = "cairn-tasks-dlq"
+
+# The ONLY way to reach the gateway (it has no public URL).
+[[services]]
+binding = "GATEWAY"
+service = "cairn-gateway"
+
+# Hourly backstop: re-arm the Scheduler DO.
+[triggers]
+crons = ["17 * * * *"]
+
+# Secrets (wrangler secret put <NAME>): CAIRN_TOKENS, SURREAL_USER, SURREAL_PASS,
+# DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN. Never OPENROUTER_API_KEY or CF_AIG_TOKEN: this Worker refuses to
+# serve if it can see it.

@@ -1,0 +1,46 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: "rustfmt, clippy" }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      # Invariant 5: only the gateway talks to OpenRouter / AI Gateway.
+      - name: upstream isolation
+        run: |
+          if grep -rIl -e "openrouter.ai" -e "gateway.ai.cloudflare.com" -e "cf-aig-authorization" crates workers --include=*.rs \
+             | grep -v -e "^crates/cairn-gateway-core/" -e "^workers/gateway/"; then
+            echo "LLM upstream referenced outside the gateway"; exit 1; fi
+      # Invariant 6: the API Worker must never bind the ledger or the key.
+      - name: gateway isolation
+        run: |
+          if grep -n -e "LEDGER" -e "OPENROUTER" -e "CF_AIG" -e "AIG_" workers/api/wrangler.toml | grep -v "^.*#"; then
+            echo "API Worker binds gateway-only resources"; exit 1; fi
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32-unknown-unknown }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p cairn-api-worker -p cairn-gateway-worker --target wasm32-unknown-unknown
+      - run: cargo install -q worker-build
+      - run: cd workers/gateway && worker-build --release
+      - run: cd workers/api && worker-build --release
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: web/pnpm-lock.yaml }
+      - run: cd web && pnpm install --frozen-lockfile && pnpm types && pnpm check && pnpm build

@@ -1,0 +1,18 @@
+{
+  "kind": "type",
+  "name": "reminder",
+  "version": 1,
+  "title": "Reminder",
+  "icon": "bell",
+  "core": true,
+  "schema": "schema.json",
+  "index": { "fire_at": "datetime", "state": "string" },
+  "title_from": "message",
+  "capture": [{ "prefix": "remind:", "field": "message" }],
+  "actions": {
+    "ack": { "patch": { "state": "acked" }, "discord_button": "Got it" },
+    "snooze_1h": { "snooze": "+1h", "discord_button": "1h" },
+    "snooze_1d": { "snooze": "+1d", "discord_button": "Tomorrow" }
+  },
+  "views": "views.js"
+}

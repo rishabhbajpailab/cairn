@@ -1,0 +1,17 @@
+{
+  "kind": "type",
+  "name": "hold-that-thought",
+  "version": 1,
+  "title": "Hold that thought",
+  "icon": "pause-circle",
+  "schema": "schema.json",
+  "index": { "snoozed_until": "datetime", "resurface": "bool" },
+  "title_from": "text",
+  "capture": [{ "prefix": "htt:", "field": "text" }, { "prefix": "hold:", "field": "text" }],
+  "actions": {
+    "resurface_tomorrow": { "snooze": "+1d", "discord_button": "Tomorrow" },
+    "resurface_next_week": { "snooze": "+7d", "discord_button": "Next week" },
+    "archive": { "lifecycle": "archive", "discord_button": "Archive" }
+  },
+  "views": "views.js"
+}

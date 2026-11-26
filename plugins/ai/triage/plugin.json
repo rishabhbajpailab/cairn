@@ -1,0 +1,9 @@
+{
+  "kind": "ai",
+  "name": "triage",
+  "version": 1,
+  "prompt": "prompt.md",
+  "input": { "shape": "items", "fields": ["id", "title", "payload", "tags", "source"], "io_ratio": 6.0 },
+  "output": "output.schema.json",
+  "apply": "triage"
+}

@@ -1,0 +1,20 @@
+[package]
+name = "cairn-scheduler"
+description = "Deterministic task orchestration: triggers, DAG lint, idempotency keys, dry-run planning."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+cairn-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+cron.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

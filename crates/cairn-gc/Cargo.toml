@@ -1,0 +1,15 @@
+[package]
+name = "cairn-gc"
+description = "Lifecycle policies: auto-archive, trash retention, purge planning (pure, deterministic)."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+cairn-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "task-run",
+  "description": "Created by the scheduler only. Linked to its task with `produced-by`; outputs link back with `produced-by`.",
+  "type": "object",
+  "required": ["label", "task", "run_key", "state", "started_at"],
+  "properties": {
+    "label": { "type": "string" },
+    "task": { "type": "string", "description": "task item ULID" },
+    "task_version": { "type": "integer" },
+    "run_key": { "type": "string" },
+    "window": { "type": "object", "properties": { "from": { "type": "string" }, "to": { "type": "string" } } },
+    "state": { "enum": ["running", "succeeded", "failed", "skipped", "dry-run"] },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "input_count": { "type": "integer" },
+    "chunks": { "type": "integer" },
+    "model": { "type": "string" },
+    "cost_usd": { "type": "number" },
+    "reserved_usd": { "type": "number" },
+    "proposed_ops": { "type": "integer" },
+    "applied_ops": { "type": "integer" },
+    "error": { "type": "string" },
+    "report": { "type": "object", "description": "Free-form per-builtin report (e.g. GC counts)" }
+  },
+  "additionalProperties": false
+}

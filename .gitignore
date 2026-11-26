@@ -1,0 +1,13 @@
+/target
+**/build/
+web/node_modules
+web/dist
+web/public/plugins
+web/src/lib/generated
+.dev.vars
+**/.dev.vars
+.wrangler/
+**/.wrangler/
+*.sqlite
+*.sqlite-*
+.DS_Store

@@ -1,0 +1,19 @@
+{
+  "kind": "type",
+  "name": "todo",
+  "version": 1,
+  "title": "To-do",
+  "icon": "check-square",
+  "schema": "schema.json",
+  "index": { "done": "bool", "due": "datetime", "priority": "int", "snoozed_until": "datetime" },
+  "title_from": "text",
+  "edge_kinds": ["subtask-of"],
+  "capture": [{ "prefix": "todo:", "field": "text" }, { "prefix": "t:", "field": "text" }],
+  "actions": {
+    "complete": { "patch": { "done": true }, "discord_button": "Done" },
+    "reopen": { "patch": { "done": false } },
+    "snooze_1h": { "snooze": "+1h", "discord_button": "1h" },
+    "snooze_1d": { "snooze": "+1d", "discord_button": "Tomorrow" }
+  },
+  "views": "views.js"
+}
