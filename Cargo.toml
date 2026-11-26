@@ -68,6 +68,7 @@ tokio = { version = "1", features = ["macros", "rt", "sync"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 rusqlite = { version = "0.37", features = ["bundled"] }
+ureq = "3"   # live SurrealDB test only (crates/cairn-store/tests/live_surreal.rs)
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
