@@ -12,6 +12,7 @@
 
 use async_trait::async_trait;
 use cairn_domain::query::RelatedTo;
+use cairn_domain::reltime;
 use cairn_domain::{
     Actor, Capture, CaptureSource, Cmp, Edge, EdgeKind, Id, Item, LayoutEntry, Lifecycle, Op, OpKind, Query, SortDir,
     SortKey, SourceKind, View, ViewKind, Where,
@@ -101,6 +102,14 @@ async fn store_contract_against_live_surreal() {
     };
     let db = format!("t{}", Id::new().to_string().to_lowercase());
     let s = connect(&url, &db);
+    // SurrealDB 3+/4 doesn't create a namespace or database implicitly.
+    let ns = env("CAIRN_SURREAL_NS", "cairn_test");
+    s.rpc_query(
+        &format!("DEFINE NAMESPACE IF NOT EXISTS {ns}; USE NS {ns}; DEFINE DATABASE IF NOT EXISTS {db};"),
+        json!({}),
+    )
+    .await
+    .expect("create namespace and database (needs a root or namespace user)");
     eprintln!("using {url} ns={} db={db}", env("CAIRN_SURREAL_NS", "cairn_test"));
 
     let result = run(&s).await;
@@ -129,7 +138,11 @@ async fn run(s: &SurrealHttpStore<Ureq>) -> Result<(), StoreError> {
         i.payload = obj(json!({ "name": "Paperwork" }));
         i
     };
-    let c = todo("Buy milk", &["errand"], json!({ "done": true, "priority": 1 }));
+    let c = todo(
+        "Buy milk",
+        &["errand"],
+        json!({ "done": true, "priority": 1, "due": reltime::canonical(now + chrono::Duration::hours(3)) }),
+    );
     let edge = Edge::new(b.id, a.id, EdgeKind::Contains);
     let view = View {
         id: Id::new(),
@@ -204,6 +217,12 @@ async fn run(s: &SurrealHttpStore<Ureq>) -> Result<(), StoreError> {
     });
     assert_eq!(ids(s.query_items(&sorted, now).await?), vec![c.id, a.id], "idx sort");
     assert_eq!(ids(s.query_items(&q(|q| q.text = Some("passport".into())), now).await?), vec![a.id], "FULLTEXT");
+    let due = |v: &'static str, op: Cmp| Query {
+        filters: vec![Where { field: "due".into(), op, value: json!(v) }],
+        ..Default::default()
+    };
+    assert_eq!(ids(s.query_items(&due("+1d", Cmp::Lt), now).await?), vec![c.id], "datetime idx vs relative time");
+    assert!(s.query_items(&due("+1h", Cmp::Lt), now).await?.is_empty(), "datetime idx vs relative time");
     assert_eq!(ids(s.query_items(&q(|q| q.updated_since = Some("-1h".into())), now).await?).len(), 3, "updated_since");
     let rel = Query {
         related_to: Some(RelatedTo { item: b.id, kind: Some("contains".into()), depth: 1 }),
@@ -286,6 +305,28 @@ async fn run(s: &SurrealHttpStore<Ureq>) -> Result<(), StoreError> {
     s.resolve_capture(odd.id, None, Some("no matcher".into())).await?;
     let purged = s.purge_resolved_captures(Utc::now() + chrono::Duration::seconds(5)).await?;
     assert_eq!(purged, 1, "only resolved captures are purged");
+
+    // ── strings stay strings (JSON-RPC would turn these into a record id and a datetime) ──
+    let tricky = {
+        let mut i = todo("note:abc", &[], json!({}));
+        i.payload =
+            obj(json!({ "text": "note:abc", "nested": { "when": "2026-01-01T00:00:00Z", "refs": ["item:01J"] } }));
+        i
+    };
+    s.apply(vec![user(OpKind::ItemCreate { item: tricky.clone() })]).await?;
+    let types = s
+        .rpc_query(
+            "LET $i = type::record('item', $id); RETURN [type::of($i.title), type::of($i.payload.text), \
+             type::of($i.payload.nested.when), type::of($i.payload.nested.refs[0])];",
+            json!({ "id": tricky.id }),
+        )
+        .await?;
+    assert_eq!(types.last(), Some(&json!(["string", "string", "string", "string"])), "payload strings retyped");
+    assert_eq!(s.get_item(tricky.id).await?.expect("tricky").payload, tricky.payload);
+    let raw = Capture::new(CaptureSource::new(SourceKind::Rest), "application/json", json!({ "x": "user:1" }));
+    s.put_capture(raw.clone()).await?;
+    let t = s.rpc_query("RETURN type::of(type::record('capture', $id).body.x)", json!({ "id": raw.id })).await?;
+    assert_eq!(t[0], json!("string"), "raw capture bodies are stored unchanged (invariant 1)");
 
     // ── ops log is append-only (op_append_only event) ──
     let upd = s

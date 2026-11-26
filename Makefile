@@ -1,4 +1,4 @@
-.PHONY: check fmt fmt-check lint test build-workers check-wasm coldstart web web-build types db dev-api dev-gateway deploy deploy-gateway deploy-api migrate hash
+.PHONY: check fmt fmt-check lint test test-live build-workers check-wasm coldstart db-init web web-build types db dev-api dev-gateway deploy deploy-gateway deploy-api migrate hash
 
 API ?= https://cairn.example.dev
 
@@ -15,6 +15,10 @@ lint:
 
 test:                                  ## native: no Cloudflare or database needed
 	cargo test --workspace
+
+SURREAL ?= http://127.0.0.1:8000
+test-live:                             ## SurrealHttpStore against a real SurrealDB (default: local `make db`)
+	CAIRN_SURREAL_URL=$(SURREAL) cargo test -p cairn-store --test live_surreal -- --nocapture
 
 check-wasm:                            ## type-check the Workers for their real target
 	cargo check -p cairn-api-worker -p cairn-gateway-worker --target wasm32-unknown-unknown
@@ -40,6 +44,10 @@ web-build:
 db:                                    ## local SurrealDB for `wrangler dev` (root/root, in-memory)
 	podman run --rm -d --name cairn-surreal -p 127.0.0.1:8000:8000 \
 	  docker.io/surrealdb/surrealdb:v3 start --user root --pass root memory
+
+db-init:                               ## create namespace `cairn` / database `main` (SurrealDB doesn't do it implicitly)
+	curl -fsS -X POST "$(SURREAL)/sql" -u root:root -H 'accept: application/json' \
+	  -d 'DEFINE NAMESPACE IF NOT EXISTS cairn; USE NS cairn; DEFINE DATABASE IF NOT EXISTS main;' >/dev/null && echo ok
 
 dev-gateway:
 	cd workers/gateway && wrangler dev --port 8788

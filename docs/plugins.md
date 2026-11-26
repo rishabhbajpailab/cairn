@@ -34,7 +34,7 @@ plugins/
 ```
 
 - **The schema is JSON Schema**, the single source of truth. The Rust core validates against it, and the TypeScript types in `web/` are generated from it (`make types`).
-- **`index`** lists the payload fields exposed to `where`, `sort` and views. The core copies these into `item.idx.*` on write, so SurrealDB can index them without knowing about payloads.
+- **`index`** lists the payload fields exposed to `where`, `sort` and views. The core copies these into `item.idx.*` on write, so SurrealDB can index them without knowing about payloads. `datetime` fields are normalised to one fixed-width UTC format (`2026-01-01T09:30:00.000Z`, `reltime::canonical`), and so are absolute and relative times in `where` values. Datetimes are stored as strings, so this is what makes comparisons and sorting correct. Missing fields never match `lt`/`lte`/`gt`/`gte`.
 - **`capture` matchers** are declarative only: prefix, regex, or JSON-shape match. Plugins never run code during ingest.
 - **`actions`** are declarative patches or lifecycle operations. They run identically whether triggered from the UI, from Discord buttons, or as AI-proposed ops.
 - **Migrations:** when `version` goes up, add a step to `migrations.json`, such as `{ "from": 1, "steps": [{ "rename": ["text", "body"] }, { "default": ["priority", 0] }] }`. The available steps are `rename`, `default`, `drop`, `map` (enum remap) and `move` (into a nested object). Migrations are **declarative on purpose**, because the core is Rust and doesn't embed a JS runtime. The core runs them lazily on read, or in bulk through an admin endpoint (`POST /api/v1/admin/migrate-type/{type}`, M2). For anything more complicated, write a one-off script against the REST API.

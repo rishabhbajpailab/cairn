@@ -236,10 +236,20 @@ impl Registry {
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
-    /// Copy the fields a plugin lists in `index` out of the payload.
+    /// Copy the fields a plugin lists in `index` out of the payload. `datetime` fields are
+    /// normalised with [`reltime::canonical_json`](cairn_domain::reltime::canonical_json) so
+    /// they compare and sort correctly as strings.
     pub fn extract_idx(&self, type_name: &str, payload: &Map<String, Value>) -> Map<String, Value> {
         let Some(t) = self.types.get(type_name) else { return Map::new() };
-        t.manifest.index.keys().filter_map(|k| payload.get(k).map(|v| (k.clone(), v.clone()))).collect()
+        t.manifest
+            .index
+            .iter()
+            .filter_map(|(k, kind)| {
+                let v = payload.get(k)?;
+                let v = if *kind == IndexKind::Datetime { cairn_domain::reltime::canonical_json(v) } else { v.clone() };
+                Some((k.clone(), v))
+            })
+            .collect()
     }
 
     pub fn derive_title(&self, type_name: &str, payload: &Map<String, Value>) -> Option<String> {
@@ -311,6 +321,15 @@ mod tests {
         assert_eq!(t, "todo");
         assert_eq!(p["text"], "renew registration");
         assert!(r.match_capture("just a thought").is_none());
+    }
+
+    #[test]
+    fn idx_datetimes_are_canonical() {
+        let r = todo_registry();
+        let p = json!({"text": "x", "due": "2026-03-01T09:30:00+01:00"}).as_object().unwrap().clone();
+        assert_eq!(r.extract_idx("todo", &p)["due"], "2026-03-01T08:30:00.000Z");
+        let p = json!({"text": "x", "due": "next week"}).as_object().unwrap().clone();
+        assert_eq!(r.extract_idx("todo", &p)["due"], "next week", "non-datetimes are left for validation");
     }
 
     #[test]

@@ -9,6 +9,7 @@
 //! written with [`Store::put_capture`] so ingest can never be blocked by op validation.
 
 mod mem;
+mod surreal_cbor;
 mod surreal_http;
 
 pub use mem::MemStore;

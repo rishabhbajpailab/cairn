@@ -25,7 +25,8 @@ The cost to watch is the **first request in a new isolate**, which builds the co
 
 1. **Surreal Cloud.**
    - Create an instance (Earth, or a dedicated Cloud node; see ADR 0001).
-   - Create a database-level user for namespace `cairn`, database `main`.
+   - Create namespace `cairn` and database `main` (SurrealDB doesn't create them on first use), then a database-level user for them.
+   - Optionally run the Store contract against it with a throwaway database: `make test-live SURREAL=https://… ` with `CAIRN_SURREAL_USER` / `CAIRN_SURREAL_PASS` set to a user allowed to create databases in `CAIRN_SURREAL_NS`. It removes its database afterwards.
    - Put the HTTPS endpoint in `config/cairn.toml` → `[surreal].url`.
 2. **OpenRouter.**
    - Create a **dedicated** regular API key for Cairn, with a **credit limit and reset**. Don't reuse a key other apps spend from: the nightly reconcile compares Cairn's ledger against this key's usage.
@@ -85,6 +86,8 @@ Both require a deploy, on purpose:
 
 ```sh
 make db                       # local SurrealDB in podman/docker at :8000 (root/root)
+make db-init                  # create ns `cairn` / db `main`: SurrealDB 3+/4 won't create them on first use
+make test-live                # optional: the Store contract against that server (tests/live_surreal.rs)
 cp workers/api/.dev.vars.example workers/api/.dev.vars
 cp workers/gateway/.dev.vars.example workers/gateway/.dev.vars
 make dev-gateway              # terminal 1

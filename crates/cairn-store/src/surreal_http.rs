@@ -12,10 +12,10 @@
 //! - `apply` sends one request: BEGIN; op statements + op-log rows; COMMIT. A `THROW` anywhere
 //!   aborts the whole batch.
 //!
-//! VERIFY IN M1 against a live instance: RPC envelope shape, header names (`Surreal-NS`,
-//! `Surreal-DB`), and the SurrealQL in `schema/` (see docs/ROADMAP.md).
+//! Verified against SurrealDB 4.0.1 by `tests/live_surreal.rs` (run it against Surreal Cloud
+//! too; see docs/deploy.md).
 
-use crate::{Applied, Result, Store, StoreError, check_ops};
+use crate::{Applied, Result, Store, StoreError, check_ops, surreal_cbor};
 use async_trait::async_trait;
 use base64::Engine;
 use cairn_domain::{Capture, Cmp, Edge, Id, Item, Lifecycle, Op, OpKind, Query, SortDir, View, reltime};
@@ -67,18 +67,28 @@ impl<T: HttpTransport> SurrealHttpStore<T> {
     }
 
     /// Run SurrealQL with bound variables; returns one result per statement.
+    ///
+    /// The wire format is CBOR, not JSON: SurrealDB parses JSON request values with its
+    /// SurrealQL parser, turning strings like `"note:abc"` into record ids (see
+    /// [`surreal_cbor`](crate::surreal_cbor)). Results come back JSON-shaped.
     pub async fn rpc_query(&self, sql: &str, vars: Value) -> Result<Vec<Value>> {
         let body = json!({ "id": 1, "method": "query", "params": [sql, vars] });
         let auth =
             base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", self.cfg.username, self.cfg.password));
-        let req = HttpRequest::post_json(format!("{}/rpc", self.cfg.url.trim_end_matches('/')), &body)
-            .map_err(|e| StoreError::Db(e.to_string()))?
-            .header("accept", "application/json")
-            .header("surreal-ns", &self.cfg.namespace)
-            .header("surreal-db", &self.cfg.database)
-            .header("authorization", format!("Basic {auth}"));
+        let req = HttpRequest {
+            method: "POST",
+            url: format!("{}/rpc", self.cfg.url.trim_end_matches('/')),
+            headers: vec![],
+            body: Some(surreal_cbor::encode(&body).map_err(StoreError::Db)?),
+        }
+        .header("content-type", "application/cbor")
+        .header("accept", "application/cbor")
+        .header("surreal-ns", &self.cfg.namespace)
+        .header("surreal-db", &self.cfg.database)
+        .header("authorization", format!("Basic {auth}"));
         let resp = self.http.send(req).await.map_err(|e| StoreError::Db(e.to_string()))?;
-        let v = resp.json().map_err(|e| StoreError::Db(format!("HTTP {}: {e}: {}", resp.status, resp.text())))?;
+        let v = surreal_cbor::decode(&resp.body)
+            .map_err(|e| StoreError::Db(format!("HTTP {}: {e}: {}", resp.status, resp.text())))?;
         if let Some(err) = v.get("error") {
             let msg = err.get("message").and_then(Value::as_str).unwrap_or("rpc error");
             return Err(db_err(msg));
@@ -304,18 +314,17 @@ impl<T: HttpTransport + 'static> Store for SurrealHttpStore<T> {
             sql.push('\n');
             // Ops log row (TODO(M3): capture `before` state for undo).
             vars.insert(format!("p{n}_opid"), json!(Id::new()));
-            let after =
-                if matches!(op.kind, OpKind::ItemPurge { .. }) { Value::Null } else { serde_json::to_value(&op.kind)? };
-            vars.insert(
-                format!("p{n}_op"),
-                json!({
-                    "actor": op.actor.as_log_string(),
-                    "kind": op_kind_name(&op.kind),
-                    "target": op_target(&op.kind),
-                    "batch": batch.to_string(),
-                    "after": after,
-                }),
-            );
+            let mut row = json!({
+                "actor": op.actor.as_log_string(),
+                "kind": op_kind_name(&op.kind),
+                "target": op_target(&op.kind),
+                "batch": batch.to_string(),
+            });
+            // A purge logs no payload. Leave `after` out (NONE): `option<object>` rejects NULL.
+            if !matches!(op.kind, OpKind::ItemPurge { .. }) {
+                row["after"] = serde_json::to_value(&op.kind)?;
+            }
+            vars.insert(format!("p{n}_op"), row);
             sql.push_str(&format!("CREATE type::record('op', $p{n}_opid) CONTENT $p{n}_op RETURN NONE;\n"));
         }
         sql.push_str("COMMIT TRANSACTION;");
@@ -369,10 +378,12 @@ impl<T: HttpTransport + 'static> Store for SurrealHttpStore<T> {
             let expr = match w.op {
                 Cmp::Eq => format!("{f} = ${var}"),
                 Cmp::Ne => format!("{f} != ${var}"),
-                Cmp::Lt => format!("{f} < ${var}"),
-                Cmp::Lte => format!("{f} <= ${var}"),
-                Cmp::Gt => format!("{f} > ${var}"),
-                Cmp::Gte => format!("{f} >= ${var}"),
+                // NONE sorts before everything in SurrealQL; missing fields never match an
+                // ordering comparison (same as MemStore).
+                Cmp::Lt => format!("({f} != NONE AND {f} < ${var})"),
+                Cmp::Lte => format!("({f} != NONE AND {f} <= ${var})"),
+                Cmp::Gt => format!("({f} != NONE AND {f} > ${var})"),
+                Cmp::Gte => format!("({f} != NONE AND {f} >= ${var})"),
                 Cmp::In => format!("{f} IN ${var}"),
                 Cmp::Contains => format!("{f} CONTAINS ${var}"),
                 Cmp::Exists => format!("{f} != NONE"),
@@ -484,7 +495,11 @@ mod tests {
     fn ok(results: Vec<Value>) -> cairn_http::HttpResponse {
         let r: Vec<Value> =
             results.into_iter().map(|v| json!({ "status": "OK", "time": "1ms", "result": v })).collect();
-        FakeTransport::json(200, json!({ "id": 1, "result": r }))
+        cbor(json!({ "id": 1, "result": r }))
+    }
+
+    fn cbor(v: Value) -> cairn_http::HttpResponse {
+        cairn_http::HttpResponse { status: 200, body: surreal_cbor::encode(&v).unwrap() }
     }
 
     #[tokio::test]
@@ -504,7 +519,8 @@ mod tests {
         let req = &sent[0];
         assert!(req.url.ends_with("/rpc"));
         assert!(req.headers.iter().any(|(k, v)| k == "surreal-ns" && v == "cairn"));
-        let body = req.body_json().unwrap();
+        assert!(req.headers.iter().any(|(k, v)| k == "content-type" && v == "application/cbor"));
+        let body = surreal_cbor::decode(req.body.as_ref().unwrap()).unwrap();
         let sql = body["params"][0].as_str().unwrap();
         assert!(sql.starts_with("BEGIN TRANSACTION;") && sql.trim_end().ends_with("COMMIT TRANSACTION;"));
         assert_eq!(sql.matches("CREATE type::record('op'").count(), 3, "every op is logged");
@@ -514,13 +530,10 @@ mod tests {
 
     #[tokio::test]
     async fn real_error_beats_generic_transaction_error() {
-        let resp = FakeTransport::json(
-            200,
-            json!({ "id": 1, "result": [
-                { "status": "ERR", "result": "The query was not executed due to a failed transaction" },
-                { "status": "ERR", "result": "An error occurred: not found: item 01J..." }
-            ]}),
-        );
+        let resp = cbor(json!({ "id": 1, "result": [
+            { "status": "ERR", "result": "The query was not executed due to a failed transaction" },
+            { "status": "ERR", "result": "An error occurred: not found: item 01J..." }
+        ]}));
         let (s, _) = store(vec![resp]);
         let err = s.apply(vec![Op::new(Actor::User, OpKind::EdgeDelete { id: Id::new() })]).await.unwrap_err();
         assert!(matches!(err, StoreError::NotFound(_)), "{err:?}");
