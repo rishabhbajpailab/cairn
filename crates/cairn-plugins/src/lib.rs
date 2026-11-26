@@ -7,6 +7,12 @@
 //! - [`Registry::derive_title`]: title from `title_from`
 //! - [`Registry::match_capture`]: declarative capture matchers (prefixes), deterministic order
 //! - [`migrate`]: declarative payload migrations (see docs/plugins.md)
+//!
+//! Schemas can be checked two ways. A [`PluginSource`] may hand over a [`Compiled`] validator
+//! generated at build time (the Worker does this through `cairn-plugins-embedded`), so loading
+//! the registry compiles nothing. Otherwise the schema is compiled at load time with
+//! `jsonschema`, which is fine natively but costs tens of milliseconds of CPU in a fresh
+//! Worker isolate (see docs/deploy.md § CPU limits).
 
 pub mod manifest;
 pub mod migrate;
@@ -32,10 +38,38 @@ pub enum PluginError {
     UnknownType(String),
 }
 
+/// A validator generated at build time (`jsonschema::validator` macro), as plain function
+/// pointers so the registry doesn't depend on the generated types.
+#[derive(Clone, Copy)]
+pub struct Compiled {
+    pub is_valid: fn(&Value) -> bool,
+    /// Every error message; empty when valid.
+    pub errors: fn(&Value) -> Vec<String>,
+}
+
+enum Check {
+    Compiled(Compiled),
+    Runtime(Box<jsonschema::Validator>),
+}
+
+impl Check {
+    fn errors(&self, instance: &Value) -> Vec<String> {
+        match self {
+            Check::Compiled(c) if (c.is_valid)(instance) => vec![],
+            Check::Compiled(c) => (c.errors)(instance),
+            Check::Runtime(v) => v.iter_errors(instance).map(|e| e.to_string()).collect(),
+        }
+    }
+
+    fn is_runtime(&self) -> bool {
+        matches!(self, Check::Runtime(_))
+    }
+}
+
 pub struct LoadedType {
     pub manifest: TypeManifest,
     pub dir: PathBuf,
-    validator: jsonschema::Validator,
+    check: Check,
 }
 
 pub struct LoadedAi {
@@ -43,7 +77,15 @@ pub struct LoadedAi {
     pub dir: PathBuf,
     /// Prompt template text (`prompt.md`).
     pub prompt: String,
-    pub output_validator: jsonschema::Validator,
+    output_check: Check,
+}
+
+impl LoadedAi {
+    /// Validate model output against `output.schema.json`.
+    pub fn validate_output(&self, output: &Value) -> Result<(), Vec<String>> {
+        let errors = self.output_check.errors(output);
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
+    }
 }
 
 /// All loaded plugins. BTreeMap keeps iteration (and therefore capture matching) deterministic.
@@ -60,6 +102,11 @@ pub trait PluginSource {
     fn dirs(&self, sub: &str) -> Vec<String>;
     /// Contents of `sub/dir/file`, if present.
     fn read(&self, sub: &str, dir: &str, file: &str) -> Option<String>;
+    /// A build-time validator for the schema at `sub/dir/file`, if the source has one.
+    /// When present, the schema file is not read or compiled at load time.
+    fn compiled(&self, _sub: &str, _dir: &str, _file: &str) -> Option<Compiled> {
+        None
+    }
 }
 
 /// Filesystem source rooted at a `plugins/` directory.
@@ -86,8 +133,22 @@ fn parse_json(path: String, raw: &str) -> Result<Value, PluginError> {
     serde_json::from_str(raw).map_err(|source| PluginError::Manifest { path: path.into(), source })
 }
 
-fn compile(name: &str, schema: &Value) -> Result<jsonschema::Validator, PluginError> {
-    jsonschema::validator_for(schema).map_err(|e| PluginError::Schema { name: name.into(), message: e.to_string() })
+fn compile(name: &str, schema: &Value) -> Result<Check, PluginError> {
+    jsonschema::validator_for(schema)
+        .map(|v| Check::Runtime(Box::new(v)))
+        .map_err(|e| PluginError::Schema { name: name.into(), message: e.to_string() })
+}
+
+/// The build-time validator for `sub/dir/file` if the source has one, else read and compile it.
+fn check_for(src: &dyn PluginSource, name: &str, sub: &str, dir: &str, file: &str) -> Result<Check, PluginError> {
+    if let Some(c) = src.compiled(sub, dir, file) {
+        return Ok(Check::Compiled(c));
+    }
+    let raw = src.read(sub, dir, file).ok_or_else(|| PluginError::Io {
+        path: format!("{sub}/{dir}/{file}").into(),
+        source: std::io::Error::new(std::io::ErrorKind::NotFound, "missing file"),
+    })?;
+    compile(name, &parse_json(format!("{sub}/{dir}/{file}"), &raw)?)
 }
 
 impl Registry {
@@ -111,15 +172,12 @@ impl Registry {
                 if is_type {
                     let manifest: TypeManifest = serde_json::from_value(value)
                         .map_err(|source| PluginError::Manifest { path: mpath.clone().into(), source })?;
-                    let schema_raw = src.read(sub, &d, &manifest.schema).ok_or_else(|| missing(&manifest.schema))?;
-                    let schema = parse_json(format!("{sub}/{d}/{}", manifest.schema), &schema_raw)?;
-                    reg.insert_type(manifest, &schema, PathBuf::from(sub).join(&d))?;
+                    let check = check_for(src, &manifest.name, sub, &d, &manifest.schema)?;
+                    reg.insert_checked(manifest, check, PathBuf::from(sub).join(&d))?;
                 } else {
                     let manifest: AiManifest = serde_json::from_value(value)
                         .map_err(|source| PluginError::Manifest { path: mpath.clone().into(), source })?;
-                    let out_raw = src.read(sub, &d, &manifest.output).ok_or_else(|| missing(&manifest.output))?;
-                    let schema = parse_json(format!("{sub}/{d}/{}", manifest.output), &out_raw)?;
-                    let output_validator = compile(&manifest.name, &schema)?;
+                    let output_check = check_for(src, &manifest.name, sub, &d, &manifest.output)?;
                     let prompt = src.read(sub, &d, &manifest.prompt).ok_or_else(|| missing(&manifest.prompt))?;
                     if reg.ai.contains_key(&manifest.name) {
                         return Err(PluginError::Duplicate(manifest.name));
@@ -127,7 +185,7 @@ impl Registry {
                     tracing::info!(plugin = %manifest.name, "loaded ai capability");
                     reg.ai.insert(
                         manifest.name.clone(),
-                        LoadedAi { manifest, dir: PathBuf::from(sub).join(&d), prompt, output_validator },
+                        LoadedAi { manifest, dir: PathBuf::from(sub).join(&d), prompt, output_check },
                     );
                 }
             }
@@ -137,13 +195,25 @@ impl Registry {
 
     /// Register a type from an in-memory manifest and schema (used by tests and `load`).
     pub fn insert_type(&mut self, manifest: TypeManifest, schema: &Value, dir: PathBuf) -> Result<(), PluginError> {
+        let check = compile(&manifest.name, schema)?;
+        self.insert_checked(manifest, check, dir)
+    }
+
+    fn insert_checked(&mut self, manifest: TypeManifest, check: Check, dir: PathBuf) -> Result<(), PluginError> {
         if self.types.contains_key(&manifest.name) {
             return Err(PluginError::Duplicate(manifest.name));
         }
-        let validator = compile(&manifest.name, schema)?;
         tracing::info!(plugin = %manifest.name, version = manifest.version, "loaded type");
-        self.types.insert(manifest.name.clone(), LoadedType { manifest, dir, validator });
+        self.types.insert(manifest.name.clone(), LoadedType { manifest, dir, check });
         Ok(())
+    }
+
+    /// Plugins whose schemas were compiled at load time rather than at build time, as
+    /// `types/<name>` or `ai/<name>`. The Worker expects this to be empty.
+    pub fn runtime_compiled(&self) -> Vec<String> {
+        let types = self.types.iter().filter(|(_, t)| t.check.is_runtime()).map(|(n, _)| format!("types/{n}"));
+        let ai = self.ai.iter().filter(|(_, a)| a.output_check.is_runtime()).map(|(n, _)| format!("ai/{n}"));
+        types.chain(ai).collect()
     }
 
     pub fn get_type(&self, name: &str) -> Option<&LoadedType> {
@@ -162,7 +232,7 @@ impl Registry {
     pub fn validate(&self, type_name: &str, payload: &Map<String, Value>) -> Result<(), Vec<String>> {
         let t = self.types.get(type_name).ok_or_else(|| vec![format!("unknown type `{type_name}`")])?;
         let instance = Value::Object(payload.clone());
-        let errors: Vec<String> = t.validator.iter_errors(&instance).map(|e| e.to_string()).collect();
+        let errors = t.check.errors(&instance);
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 

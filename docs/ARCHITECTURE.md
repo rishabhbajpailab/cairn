@@ -41,6 +41,7 @@ It runs entirely on **Cloudflare Workers + Durable Objects + Queues**, with **Su
 | `cairn-http` | `HttpTransport` trait plus a fake for tests | everywhere |
 | `cairn-store` | `Store` trait, `MemStore` for tests, `SurrealHttpStore` (SurrealDB `/rpc` over HTTP) | everywhere |
 | `cairn-plugins` | Plugin registry (from the filesystem, or embedded in the build), JSON Schema validation, idx extraction, capture matchers, migrations | everywhere |
+| `cairn-plugins-embedded` | The repo's `plugins/` embedded in the binary, with each JSON Schema compiled to Rust at build time (no schema compilation in the request path) | inside the API Worker, plus native tests |
 | `cairn-scheduler` | Task definitions, DAG lint, cron evaluation, `next_fire_after`, run keys | everywhere |
 | `cairn-gc` | Lifecycle policies as a pure planner | everywhere |
 | `cairn-app` | Platform-agnostic application: router, ingest, Queue consumer body, reminders, Discord, AI apply. Talks to the platform only through the traits in `ports.rs`. | inside the API Worker, plus native tests |

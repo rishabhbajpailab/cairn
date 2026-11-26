@@ -38,6 +38,11 @@ fn plugins() -> Result<Arc<Registry>> {
             return Ok(v.clone());
         }
         let v = Arc::new(Registry::load_from(&Embedded).map_err(|e| Error::RustError(format!("plugins: {e}")))?);
+        let slow = v.runtime_compiled();
+        if !slow.is_empty() {
+            // Costs CPU on every cold isolate; see docs/deploy.md § CPU limits.
+            tracing::warn!(?slow, "plugin schemas compiled at runtime instead of build time");
+        }
         let _ = c.set(v.clone());
         Ok(v)
     })

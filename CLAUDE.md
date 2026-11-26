@@ -8,6 +8,7 @@ crates/cairn-domain        pure types (Item, Edge, View, Op, Capture, Query): no
 crates/cairn-http          HttpTransport trait + FakeTransport (tests)
 crates/cairn-store         Store trait, MemStore (tests), SurrealHttpStore (/rpc over HTTP)
 crates/cairn-plugins       plugin registry (fs or embedded), JSON Schema, idx, capture matchers
+crates/cairn-plugins-embedded  plugins/ embedded + JSON Schemas compiled to Rust at build time
 crates/cairn-scheduler     TaskDef, DAG lint, cron, next_fire_after, run keys
 crates/cairn-gc            lifecycle planner (pure)
 crates/cairn-app           platform-agnostic app: router, ingest, consumer, reminders, Discord, ai_apply
@@ -29,6 +30,7 @@ make check          # fmt check + clippy -D warnings + tests (run before every c
 make test           # cargo test --workspace (native; no Cloudflare or DB needed)
 make build-workers  # worker-build --release for both Workers (needs the wasm32 target)
 make dev-api | make dev-gateway | make web | make db     # local dev, see docs/deploy.md
+make coldstart      # CPU cost of a cold plugin-registry load, as wasm under Node
 make deploy         # web build → gateway → api
 make migrate TOKEN=<admin token> [API=https://…]
 make types          # TS types from plugins/types/*/schema.json
@@ -42,6 +44,7 @@ make hash           # sha256 of a token, for CAIRN_TOKENS
   - no `std::time::Instant`; use `chrono::Utc::now()`
   - no blocking I/O
   - tokio is a dev-dependency only
+- **Keep the cold path cheap.** We plan on the Workers Paid plan, but a new isolate's first request should still stay well under 10 ms of CPU. Don't compile JSON Schemas or do other heavy setup at runtime. Do it at build time (see `cairn-plugins-embedded`), and check with `make coldstart`.
 - **Durable Object SQLite forbids `BEGIN`.** The ledger relies on the DO handling one request at a time, plus no awaits between the check and the write. Keep it that way.
 
 ## Invariants (docs/ARCHITECTURE.md § Invariants)

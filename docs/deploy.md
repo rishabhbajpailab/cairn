@@ -2,6 +2,25 @@
 
 Everything runs on Cloudflare plus Surreal Cloud. You need `wrangler` (`npm i -g wrangler`), a Rust toolchain with the `wasm32-unknown-unknown` target, and `pnpm`.
 
+## Plan and CPU limits
+
+**Use the Workers Paid plan.** The Free plan allows 10 ms of CPU time per HTTP request; Paid allows up to 5 minutes ([limits](https://developers.cloudflare.com/workers/platform/limits/)). Time spent waiting on the network (SurrealDB, the gateway, Discord) doesn't count, but everything Rust does in wasm does, including the Rust↔JavaScript conversions at the binding boundary.
+
+The cost to watch is the **first request in a new isolate**, which builds the config and plugin registry (cached per isolate after that):
+
+- Plugin JSON Schemas are **compiled at build time**. `cairn-plugins-embedded` turns each schema into Rust with `jsonschema::validator`, so loading the registry only parses the small manifests. An invalid schema fails the build rather than the first request.
+- Measured with `make coldstart`, wasm under Node (V8, like workerd), 8 schemas:
+
+  | | first load | warm reload |
+  |---|---|---|
+  | compiled at build time (what the Worker does) | 3–4.5 ms | ~0.2 ms |
+  | compiled at runtime (`FsSource`, the old path) | 30–45 ms | 8–11 ms |
+
+  Runtime compilation alone was over three times the Free plan's budget, mostly because every schema was checked against the draft 2020-12 meta-schema, and on wasm that meta-validator isn't cached.
+- The API Worker logs a warning if any plugin schema ever ends up compiled at runtime (`Registry::runtime_compiled`).
+- Even precompiled, a cold request still spends a few milliseconds on wasm instantiation, the registry, TOML config, routing and JSON. Discord signature checks (ed25519) add more. On Free that leaves little headroom. On Paid it's irrelevant.
+- To check in production, look at **CPU time** per invocation in Workers Logs, or run `wrangler tail`.
+
 ## One-time setup
 
 1. **Surreal Cloud.**

@@ -1,4 +1,4 @@
-.PHONY: check fmt fmt-check lint test build-workers check-wasm web web-build types db dev-api dev-gateway deploy deploy-gateway deploy-api migrate hash
+.PHONY: check fmt fmt-check lint test build-workers check-wasm coldstart web web-build types db dev-api dev-gateway deploy deploy-gateway deploy-api migrate hash
 
 API ?= https://cairn.example.dev
 
@@ -22,6 +22,11 @@ check-wasm:                            ## type-check the Workers for their real 
 build-workers:
 	cd workers/gateway && worker-build --release
 	cd workers/api && worker-build --release
+
+coldstart:                             ## CPU cost of loading plugins in a fresh isolate (wasm under Node)
+	cargo build -q --release --target wasm32-wasip1 -p cairn-plugins-embedded --example coldstart
+	@for m in embedded runtime; do PLUGINS=$(CURDIR)/plugins node --no-warnings scripts/wasi-run.mjs \
+	  target/wasm32-wasip1/release/examples/coldstart.wasm $$m /plugins; done
 
 types:                                 ## TS types from plugins/types/*/schema.json
 	cd web && pnpm types

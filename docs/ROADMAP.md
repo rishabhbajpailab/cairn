@@ -15,7 +15,9 @@ Each milestone should be usable on its own before the next one starts. Tick item
   - the `/rpc` envelope and the `surreal-ns` / `surreal-db` header names
   - `type::record`, `record::id`, `INSERT RELATION`, `FULLTEXT`, and the `op_append_only` event
   - on Earth specifically: whether table events run
-- [ ] **Build the Workers for `wasm32-unknown-unknown`** (`make build-workers`). The glue type-checks natively, but the starter was assembled where the wasm target couldn't be installed. Expect small fixes around getrandom, chrono and wasm-bindgen.
+- [x] **Build the Workers for `wasm32-unknown-unknown`** (`make build-workers`). Both build with `worker-build --release` and no code changes. Sizes: API 5.8 MB raw / 1.57 MB gzipped, gateway 1.1 MB / 0.35 MB.
+- [x] **Keep the cold path under the CPU limit** (ADR 0013). Free allows 10 ms of CPU per request, and runtime JSON Schema compilation alone took 30–45 ms on a new isolate's first request. Schemas are now compiled to Rust at build time (`cairn-plugins-embedded`), which brings the cold registry load to 3–4.5 ms (`make coldstart`). **Plan on the Workers Paid plan** anyway: see deploy.md § Plan and CPU limits.
+- [ ] Check real CPU time per invocation in Workers Logs after the first deploy (cold capture, cold Discord interaction, queue batch). If queue batches are heavy, consider sending messages as JSON text to skip the `serde-wasm-bindgen` conversion (that's a queue message contract change, so update docs/ingest.md).
 - [ ] `wrangler dev` end to end: capture → queue → Surreal → Hub event in the browser
 - [ ] **Check AI Gateway BYOK with OpenRouter.** Cloudflare's BYOK docs don't list supported providers. Things to check:
   - whether the stored key is injected for `/openrouter/...` passthrough

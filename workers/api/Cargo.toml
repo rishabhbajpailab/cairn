@@ -13,6 +13,7 @@ cairn-app.workspace = true
 cairn-domain.workspace = true
 cairn-http.workspace = true
 cairn-plugins.workspace = true
+cairn-plugins-embedded.workspace = true
 cairn-store.workspace = true
 worker.workspace = true
 wasm-bindgen.workspace = true
