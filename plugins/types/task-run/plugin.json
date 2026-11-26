@@ -1,0 +1,12 @@
+{
+  "kind": "type",
+  "name": "task-run",
+  "version": 1,
+  "title": "Task run",
+  "icon": "play-circle",
+  "core": true,
+  "schema": "schema.json",
+  "index": { "state": "string", "started_at": "datetime", "cost_usd": "float" },
+  "title_from": "label",
+  "views": "views.js"
+}

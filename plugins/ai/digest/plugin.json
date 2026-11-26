@@ -1,0 +1,9 @@
+{
+  "kind": "ai",
+  "name": "digest",
+  "version": 1,
+  "prompt": "prompt.md",
+  "input": { "shape": "items", "fields": ["id", "type", "title", "idx", "tags"], "io_ratio": 4.0 },
+  "output": "output.schema.json",
+  "apply": "digest"
+}

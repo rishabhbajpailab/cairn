@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "bucket",
+  "description": "Manual bucket: members via `contains` edges. Smart bucket: `query` set, membership computed.",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "color": { "type": "string" },
+    "smart": { "type": "boolean", "default": false },
+    "query": { "type": "object", "description": "cairn_domain::Query (see docs/data-model.md)" }
+  },
+  "additionalProperties": false
+}

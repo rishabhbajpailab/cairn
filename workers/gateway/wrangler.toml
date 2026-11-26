@@ -1,0 +1,34 @@
+# Cairn gateway Worker: the only Worker with a spend credential. No public URL.
+name = "cairn-gateway"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-11-01"
+workers_dev = false
+preview_urls = false
+# no `routes`: reachable only via the API Worker's GATEWAY Service Binding
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "LEDGER"
+class_name = "LedgerDo"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LedgerDo"]
+
+[vars]
+# Lifting a disable (kill switch, breaker, reconcile drift, rejected key) REQUIRES a deploy:
+# set this to the current time (RFC 3339) and run `make deploy-gateway`.
+ENABLE_AFTER = "1970-01-01T00:00:00Z"
+
+# Cloudflare AI Gateway (BYOK). The OpenRouter key is stored in the gateway's Provider Keys
+# (Secrets Store); this Worker only holds CF_AIG_TOKEN. Verify in M1 whether the path needs
+# the trailing /v1 (Cloudflare's OpenRouter page shows both forms).
+AIG_BASE_URL = "https://gateway.ai.cloudflare.com/v1/REPLACE_ACCOUNT_ID/cairn/openrouter/v1"
+# Stored-key alias for Cairn's own OpenRouter key (keep Cairn's key separate from other apps
+# sharing this AI Gateway so the ledger can be reconciled against it).
+AIG_BYOK_ALIAS = "cairn"
+
+# Secret (wrangler secret put CF_AIG_TOKEN): an AI Gateway auth token for the `cairn` gateway.
+# Never also bind OPENROUTER_API_KEY here in production; the Worker refuses if both exist.

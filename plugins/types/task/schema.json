@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "task",
+  "description": "Deterministic task definition. Contract: docs/tasks.md. Linted by cairn-scheduler before save.",
+  "type": "object",
+  "required": ["name", "uses", "trigger"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "uses": { "type": "string", "pattern": "^(ai|builtin)/[a-z0-9-]+$" },
+    "enabled": { "type": "boolean", "default": true },
+    "lint_errors": { "type": "array", "items": { "type": "string" } },
+    "trigger": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "cron": { "type": "string" },
+        "on": {
+          "type": "object",
+          "required": ["event"],
+          "properties": {
+            "event": { "enum": ["item.created", "item.patched", "capture.received"] },
+            "where": { "type": "object" }
+          }
+        },
+        "after": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      },
+      "additionalProperties": false
+    },
+    "input": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "object" },
+        "max_items": { "type": "integer", "minimum": 1, "maximum": 2000, "default": 200 }
+      }
+    },
+    "models": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "select": { "enum": ["cheapest", "first-available"], "default": "first-available" },
+    "provider": {
+      "type": "object",
+      "properties": {
+        "data_collection": { "enum": ["allow", "deny"], "default": "deny" },
+        "require_parameters": { "type": "boolean", "default": true },
+        "zdr": { "type": "boolean" }
+      }
+    },
+    "fanout": {
+      "type": "object",
+      "required": ["by", "max"],
+      "properties": {
+        "by": { "enum": ["item", "bucket", "type", "chunk"] },
+        "chunk_size": { "type": "integer", "minimum": 1 },
+        "max": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "concurrency": { "type": "integer", "minimum": 1, "maximum": 16, "default": 2 }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "required": ["per_run_usd", "per_day_usd"],
+      "properties": {
+        "per_run_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "per_day_usd": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "max_tokens": { "type": "integer", "minimum": 1, "maximum": 32000, "default": 1500 },
+    "on_failure": { "enum": ["skip-and-notify", "skip", "retry-once"], "default": "skip-and-notify" },
+    "apply": { "enum": ["auto", "review"], "default": "review" },
+    "retain_runs": { "type": "string", "default": "30d" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "uses": { "pattern": "^ai/" } } },
+      "then": { "required": ["models", "budget"], "properties": { "models": { "minItems": 1 } } }
+    }
+  ],
+  "additionalProperties": false
+}

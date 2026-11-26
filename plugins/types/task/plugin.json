@@ -1,0 +1,12 @@
+{
+  "kind": "type",
+  "name": "task",
+  "version": 1,
+  "title": "Task definition",
+  "icon": "workflow",
+  "core": true,
+  "schema": "schema.json",
+  "index": { "enabled": "bool", "uses": "string" },
+  "title_from": "name",
+  "views": "views.js"
+}

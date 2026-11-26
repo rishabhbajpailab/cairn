@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hold-that-thought",
+  "type": "object",
+  "required": ["text"],
+  "properties": {
+    "text": { "type": "string", "minLength": 1 },
+    "context": { "type": "string", "description": "What you were doing when you had the thought" },
+    "snoozed_until": { "type": "string", "format": "date-time" },
+    "resurface": { "type": "boolean", "default": true }
+  },
+  "additionalProperties": false
+}

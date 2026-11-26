@@ -1,0 +1,7 @@
+# Local dev for `wrangler dev` (copy to .dev.vars; gitignored). Pick ONE:
+#
+# a) Through AI Gateway (same path as production; needs AIG_BASE_URL in wrangler.toml):
+CF_AIG_TOKEN=REPLACE
+#
+# b) Direct to OpenRouter with a separate, low-limit dev key (comment out CF_AIG_TOKEN):
+# OPENROUTER_API_KEY=sk-or-v1-REPLACE

@@ -1,0 +1,44 @@
+# Cairn API Worker configuration. Committed and embedded at build time: changing it means a
+# deploy. Secrets are Worker secrets (`wrangler secret put …`), never in this file.
+
+timezone = "America/Los_Angeles"   # cron triggers, quiet hours and digest times use this zone
+
+[surreal]
+url = "https://REPLACE-instance.surreal.cloud"   # Surreal Cloud HTTPS endpoint
+namespace = "cairn"
+database = "main"
+# credentials: SURREAL_USER / SURREAL_PASS Worker secrets (database-level user, not root)
+
+[discord]
+enabled = false
+dm_user_id = ""                    # your Discord user id; reminders and digests DM you
+# DISCORD_PUBLIC_KEY / DISCORD_BOT_TOKEN are Worker secrets
+
+[notify]
+max_reminders_per_day = 8          # hard cap on AI-proposed reminders applied per day
+quiet_hours = ["22:30", "07:30"]   # reminders that come due in this window wait until it ends
+
+[gc]
+trash_retention = "30d"
+capture_retention = "7d"           # raw captures (capture table) are deleted this long after they resolve into an item
+
+[[gc.policy]]
+match = { types = ["todo"], where = [{ field = "done", op = "eq", value = true }] }
+older_than = "14d"
+action = "archive"
+
+[[gc.policy]]
+match = { types = ["reminder"], where = [{ field = "state", op = "eq", value = "acked" }] }
+older_than = "7d"
+action = "archive"
+
+[[gc.policy]]
+match = { types = ["hold-that-thought"], tags_none = ["keep"] }
+older_than = "60d"
+action = "nudge"
+
+# Webhook sources (one block each). Token hash: `make hash`.
+# [[webhook]]
+# source = "github"
+# token_sha256 = "<sha256 of the token you give the sender>"
+# map = { title = "$.title", text = "$.body", tags = ["webhook"] }

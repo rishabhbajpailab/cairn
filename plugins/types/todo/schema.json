@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "todo",
+  "type": "object",
+  "required": ["text"],
+  "properties": {
+    "text": { "type": "string", "minLength": 1 },
+    "notes": { "type": "string" },
+    "done": { "type": "boolean", "default": false },
+    "due": { "type": "string", "format": "date-time" },
+    "priority": { "type": "integer", "minimum": 0, "maximum": 3, "default": 1 },
+    "snoozed_until": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

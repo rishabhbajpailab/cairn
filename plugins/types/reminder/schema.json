@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reminder",
+  "description": "Fired by the deterministic notifier. Linked to its subject with a `remind-about` edge.",
+  "type": "object",
+  "required": ["message", "fire_at"],
+  "properties": {
+    "message": { "type": "string", "minLength": 1 },
+    "fire_at": { "type": "string", "format": "date-time" },
+    "state": { "enum": ["pending", "sent", "acked", "cancelled"], "default": "pending" },
+    "channel": { "enum": ["discord"], "default": "discord" },
+    "snoozed_until": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

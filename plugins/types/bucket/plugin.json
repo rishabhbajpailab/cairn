@@ -1,0 +1,12 @@
+{
+  "kind": "type",
+  "name": "bucket",
+  "version": 1,
+  "title": "Bucket",
+  "icon": "folder",
+  "core": true,
+  "schema": "schema.json",
+  "index": { "smart": "bool" },
+  "title_from": "name",
+  "views": "views.js"
+}
