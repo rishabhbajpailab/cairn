@@ -29,6 +29,7 @@ Keep Cairn's key separate from other apps, using AI Gateway's `cairn` alias. The
 - **`CF_AIG_TOKEN`** (an auth token for the `cairn` gateway) is the only credential the gateway Worker holds. Treat it as a spend credential: anyone with it can spend through the stored key, up to the limits in this layer and layer 1.
 - **A spend-limit rule** sits slightly above `global.per_day_usd`. AI Gateway checks it before forwarding each request, and records cost after the request completes. Its enforcement is eventually consistent, so it can be briefly overshot by a burst. That's why it's the outer net and not the primary control. When it blocks, AI Gateway returns 429. The gateway Worker then stops trying further models and releases the reservation at $0.
 - **Fallback routing on spend limits stays off,** because a cap must block, not reroute.
+- **Every request carries `cf-aig-no-wholesale: true`,** so AI Gateway never falls back to Unified Billing (Cloudflare credits) when the stored key is missing. That fallback would bypass the OpenRouter key limit.
 - **Every request carries `cf-aig-metadata: {app, task, plugin}`,** so analytics and optional per-task rules can split spend by task and plugin.
 
 ## Layer 3: the `cairn-gateway` Worker (primary, exact control)

@@ -54,7 +54,12 @@ impl Upstream {
             Upstream::AiGateway { token, alias, .. } => {
                 // No provider Authorization header: AI Gateway substitutes the stored key
                 // only when it's absent.
-                let mut r = req.header("cf-aig-authorization", format!("Bearer {token}"));
+                // `cf-aig-no-wholesale`: if no stored key matches (say, a mistyped alias), fail
+                // with error 2044 instead of falling back to Unified Billing, which would bill
+                // Cloudflare credits and bypass the OpenRouter key's limit.
+                let mut r = req
+                    .header("cf-aig-authorization", format!("Bearer {token}"))
+                    .header("cf-aig-no-wholesale", "true");
                 if let Some(a) = alias {
                     r = r.header("cf-aig-byok-alias", a.as_str());
                 }
@@ -280,6 +285,7 @@ mod tests {
         assert!(req.url.ends_with("/openrouter/v1/chat/completions"));
         assert_eq!(h("cf-aig-authorization").as_deref(), Some("Bearer aig-token"));
         assert_eq!(h("cf-aig-byok-alias").as_deref(), Some("cairn"));
+        assert_eq!(h("cf-aig-no-wholesale").as_deref(), Some("true"), "never fall back to Unified Billing");
         assert!(h("cf-aig-metadata").unwrap().contains("nightly"));
         assert!(h("authorization").is_none(), "provider Authorization must be absent for BYOK injection");
     }

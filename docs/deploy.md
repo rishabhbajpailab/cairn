@@ -39,6 +39,7 @@ The cost to watch is the **first request in a new isolate**, which builds the co
    - Under **Provider Keys**, add the OpenRouter key from step 2 with the alias `cairn`. It's stored in Secrets Store, and no Worker ever sees it.
    - Under **Settings → Spend limits**, add one rule for all traffic, set slightly above `global.per_day_usd` (say 1.2×) on a daily window. This is an independent outer cap in case the ledger is wrong. Optionally add a rule filtered on metadata `app = cairn`, if other apps share the gateway.
    - Leave spend-limit fallback routing **off**: a limit should block, not reroute.
+   - Turn on **Require provider credentials** (no Unified Billing fallback). The gateway also sends `cf-aig-no-wholesale: true` on every request, so a missing stored key fails with error 2044 instead of billing your Cloudflare credits.
    - Put your account ID into `AIG_BASE_URL` in `workers/gateway/wrangler.toml`.
 4. **Queues:**
    ```sh

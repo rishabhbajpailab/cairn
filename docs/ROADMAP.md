@@ -22,12 +22,14 @@ Each milestone should be usable on its own before the next one starts. Tick item
 - [x] **Keep the cold path under the CPU limit** (ADR 0013). Free allows 10 ms of CPU per request, and runtime JSON Schema compilation alone took 30–45 ms on a new isolate's first request. Schemas are now compiled to Rust at build time (`cairn-plugins-embedded`), which brings the cold registry load to 3–4.5 ms (`make coldstart`). **Plan on the Workers Paid plan** anyway: see deploy.md § Plan and CPU limits.
 - [ ] Check real CPU time per invocation in Workers Logs after the first deploy (cold capture, cold Discord interaction, queue batch). If queue batches are heavy, consider sending messages as JSON text to skip the `serde-wasm-bindgen` conversion (that's a queue message contract change, so update docs/ingest.md).
 - [x] `wrangler dev` end to end (wrangler 4.168, local SurrealDB 4.0.1): `make migrate` (idempotent), then REST capture → CAPTURES queue → consumer → SurrealDB → `GET /api/v1/items/{id}` and `/api/v1/query`, plus an `item.created` event on a `/hub` WebSocket. A bad `?token=` gets 401, and the static web app and SPA fallback are served. The browser UI itself hasn't been clicked through yet.
-- [ ] **Check AI Gateway BYOK with OpenRouter.** Cloudflare's BYOK docs don't list supported providers. Things to check:
-  - whether the stored key is injected for `/openrouter/...` passthrough
-  - whether `AIG_BASE_URL` needs a trailing `/v1`
-  - whether `cf-aig-metadata` reaches the analytics and spend-limit rules
-  - whether `GET …/key` is proxied with the stored key
-  - If `/key` isn't proxied, set `key_check = "best-effort"` (after setting both dashboard limits). Reconcile then reports `ok: null`; a later option is reconciling against AI Gateway analytics via a read-only Cloudflare API token.
+- [ ] **Check AI Gateway BYOK with OpenRouter.** Cloudflare docs (checked 2026-11-26) confirm the design. The live checks still need a deploy:
+  - [x] Stored keys are injected on provider passthrough (`/openrouter/...`) only when no provider `Authorization` header is sent. The gateway sends none, and a test asserts that.
+  - [x] `cf-aig-byok-alias` selects a non-default stored key on passthrough requests (the alias is ignored only on Unified Billing endpoints, which Cairn doesn't use).
+  - [x] Spend-limit rules and analytics can filter and split by custom metadata (`cf-aig-metadata`). Spend limits are eventually consistent, so they remain the outer net and the ledger stays primary.
+  - [x] Added `cf-aig-no-wholesale: true`. Without it, a missing or mistyped stored key could fall back to Unified Billing, charging Cloudflare credits and bypassing the OpenRouter key limit. It now fails with error 2044.
+  - [ ] Trailing `/v1`: the OpenRouter page shows both `…/openrouter/chat/completions` and `…/openrouter/v1/chat/completions`. `AIG_BASE_URL` uses `/v1`; confirm with one real call.
+  - [ ] Whether `GET …/openrouter/v1/key` is proxied with the stored key (not documented). If not, set `key_check = "best-effort"` (after setting both dashboard limits). Reconcile then reports `ok: null`. A later option is reconciling against AI Gateway analytics (GraphQL `aiGatewayRequestsAdaptiveGroups`, `sum { cost }`) via a read-only Account Analytics token.
+  - [ ] Optionally also turn on **Require provider credentials** on the gateway, which enforces the same thing as `cf-aig-no-wholesale` on the dashboard side.
 - [ ] API tokens in the `api_token` table (replacing the `CAIRN_TOKENS` secret), plus admin endpoints to create and revoke them
 - [ ] Webhook JSONPath mapping (`[[webhook]].map`)
 - [ ] iOS Shortcut documented and working
