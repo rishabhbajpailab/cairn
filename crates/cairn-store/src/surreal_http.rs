@@ -34,6 +34,32 @@ pub struct SurrealConfig {
     /// Database-level user (least privilege).
     pub username: String,
     pub password: String,
+    /// Where `username` is defined. SurrealDB only finds a namespace or database user if the
+    /// `surreal-auth-ns` / `surreal-auth-db` headers say so; without them Basic auth is checked
+    /// against root users and fails.
+    pub auth: AuthLevel,
+}
+
+/// The level a SurrealDB user is defined at (`DEFINE USER … ON ROOT | NAMESPACE | DATABASE`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AuthLevel {
+    Root,
+    Namespace,
+    /// Production: a database-level user on Cairn's own namespace/database.
+    #[default]
+    Database,
+}
+
+impl AuthLevel {
+    /// `root`, `namespace` / `ns`, `database` / `db` (case-insensitive).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "root" => Some(AuthLevel::Root),
+            "namespace" | "ns" => Some(AuthLevel::Namespace),
+            "database" | "db" => Some(AuthLevel::Database),
+            _ => None,
+        }
+    }
 }
 
 pub struct SurrealHttpStore<T: HttpTransport> {
@@ -86,14 +112,28 @@ impl<T: HttpTransport> SurrealHttpStore<T> {
         .header("surreal-ns", &self.cfg.namespace)
         .header("surreal-db", &self.cfg.database)
         .header("authorization", format!("Basic {auth}"));
+        let req = match self.cfg.auth {
+            AuthLevel::Root => req,
+            AuthLevel::Namespace => req.header("surreal-auth-ns", &self.cfg.namespace),
+            AuthLevel::Database => {
+                req.header("surreal-auth-ns", &self.cfg.namespace).header("surreal-auth-db", &self.cfg.database)
+            }
+        };
         let resp = self.http.send(req).await.map_err(|e| StoreError::Db(e.to_string()))?;
-        let v = surreal_cbor::decode(&resp.body)
-            .map_err(|e| StoreError::Db(format!("HTTP {}: {e}: {}", resp.status, resp.text())))?;
-        if let Some(err) = v.get("error") {
+        // A plain-text error body (e.g. 401 "There was a problem with authentication") can
+        // still decode as *some* CBOR value, so never trust the body alone: require a 2xx and
+        // a real RPC envelope, or this would report success for a query that never ran.
+        let v = surreal_cbor::decode(&resp.body).ok();
+        if let Some(err) = v.as_ref().and_then(|v| v.get("error")) {
             let msg = err.get("message").and_then(Value::as_str).unwrap_or("rpc error");
             return Err(db_err(msg));
         }
-        let results = v.get("result").and_then(Value::as_array).cloned().unwrap_or_default();
+        if !resp.is_success() {
+            return Err(StoreError::Db(format!("HTTP {}: {}", resp.status, resp.text().trim())));
+        }
+        let Some(results) = v.as_ref().and_then(|v| v.get("result")).and_then(Value::as_array).cloned() else {
+            return Err(StoreError::Db(format!("not an RPC response: {}", resp.text().trim())));
+        };
         // Surface the *real* failure, not the generic "not executed" on sibling statements.
         let mut first_err: Option<String> = None;
         for r in &results {
@@ -488,6 +528,7 @@ mod tests {
             database: "main".into(),
             username: "u".into(),
             password: "p".into(),
+            auth: AuthLevel::Database,
         };
         (SurrealHttpStore::new(t.clone(), cfg), t)
     }
@@ -526,6 +567,28 @@ mod tests {
         assert_eq!(sql.matches("CREATE type::record('op'").count(), 3, "every op is logged");
         assert_eq!(body["params"][1]["p0_id"], json!(a.id.to_string()));
         assert!(!sql.contains(&a.id.to_string()), "ids are bound, never interpolated");
+    }
+
+    #[tokio::test]
+    async fn database_user_sends_auth_level_headers() {
+        let (s, t) = store(vec![ok(vec![])]);
+        s.rpc_query("RETURN 1", json!({})).await.unwrap();
+        let h = &t.sent()[0].headers;
+        assert!(h.iter().any(|(k, v)| k == "surreal-auth-ns" && v == "cairn"));
+        assert!(h.iter().any(|(k, v)| k == "surreal-auth-db" && v == "main"));
+    }
+
+    #[tokio::test]
+    async fn auth_failures_and_non_envelopes_are_errors() {
+        // SurrealDB 4 answers a bad login with plain text, which decodes as a CBOR string.
+        let text = |status, body: &str| cairn_http::HttpResponse { status, body: body.as_bytes().to_vec() };
+        let (s, _) = store(vec![text(401, "There was a problem with authentication")]);
+        let e = s.rpc_query("RETURN 1", json!({})).await.unwrap_err();
+        assert!(e.to_string().contains("401"), "{e}");
+        let (s, _) = store(vec![cbor(json!("hello"))]);
+        assert!(s.rpc_query("RETURN 1", json!({})).await.is_err(), "200 without an envelope");
+        let (s, _) = store(vec![cbor(json!({ "id": 1, "error": { "code": -32000, "message": "parse error" } }))]);
+        assert!(s.rpc_query("RETURN 1", json!({})).await.is_err());
     }
 
     #[tokio::test]

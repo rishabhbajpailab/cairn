@@ -4,6 +4,7 @@
 //!   CAIRN_SURREAL_URL=http://127.0.0.1:8000 cargo test -p cairn-store --test live_surreal -- --nocapture
 //!
 //! Optional: `CAIRN_SURREAL_USER` / `CAIRN_SURREAL_PASS` (default root/root),
+//! `CAIRN_SURREAL_AUTH` (`root` | `namespace`, default root; the test creates a database),
 //! `CAIRN_SURREAL_NS` (default `cairn_test`). Each run uses a fresh database, `t<ulid>`, and
 //! removes it afterwards unless `CAIRN_SURREAL_KEEP=1`.
 //!
@@ -18,7 +19,7 @@ use cairn_domain::{
     SortKey, SourceKind, View, ViewKind, Where,
 };
 use cairn_http::{HttpError, HttpRequest, HttpResponse, HttpTransport};
-use cairn_store::{SchemaFile, Store, StoreError, SurrealConfig, SurrealHttpStore};
+use cairn_store::{AuthLevel, SchemaFile, Store, StoreError, SurrealConfig, SurrealHttpStore};
 use chrono::Utc;
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
@@ -54,6 +55,8 @@ fn connect(url: &str, database: &str) -> SurrealHttpStore<Ureq> {
             database: database.into(),
             username: env("CAIRN_SURREAL_USER", "root"),
             password: env("CAIRN_SURREAL_PASS", "root"),
+            auth: AuthLevel::parse(&env("CAIRN_SURREAL_AUTH", "root"))
+                .expect("CAIRN_SURREAL_AUTH: root|namespace|database"),
         },
     )
 }

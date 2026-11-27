@@ -69,6 +69,12 @@ pub fn surreal_store(env: &Env, cfg: &CoreConfig) -> Result<Arc<SurrealHttpStore
             database: s.database.clone(),
             username: secret(env, "SURREAL_USER").ok_or_else(|| Error::RustError("SURREAL_USER secret".into()))?,
             password: secret(env, "SURREAL_PASS").ok_or_else(|| Error::RustError("SURREAL_PASS secret".into()))?,
+            // `SURREAL_AUTH_LEVEL=root` for a local `make db`; production is a database user.
+            auth: env
+                .var("SURREAL_AUTH_LEVEL")
+                .ok()
+                .and_then(|v| cairn_store::AuthLevel::parse(&v.to_string()))
+                .unwrap_or_default(),
         },
     )))
 }
