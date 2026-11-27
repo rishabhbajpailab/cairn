@@ -6,17 +6,19 @@
 #   (or `make vps-up`, which does exactly that)
 #
 # - eoc-cairn-index: cairn ↔ EoC's `index` (SurrealDB 4.0.1). SURREAL_URL below.
-# - eoc-cairn-door:  EoC's `door` (Caddy, ports 80/443) ↔ cairn. EoC's
-#   deploy/sites/cairn.caddy proxies CAIRN_ADDRESS to cairn:8787.
-# Only `cairn` joins them, never the gateway, and cairn never joins EoC's
-# `inside` network, so it cannot reach EoC's book.
+# - eoc-cairn-door:  EoC's `door` (Caddy, ports 80/443) ↔ cairn-sign-in. EoC's
+#   deploy/sites/cairn.caddy proxies CAIRN_ADDRESS to cairn-sign-in:4180.
+# The door can reach only Cairn's sign-in, never cairn itself. The gateway joins no EoC
+# network, and nothing of Cairn's joins EoC's `inside`, where EoC's book is.
 services:
+  cairn-sign-in:
+    ports: !reset []                 # the door reaches it over eoc-cairn-door
+    networks: [default, eoc-door]
+
   cairn:
     environment:
       SURREAL_URL: http://index:8000
-    # The door reaches cairn over eoc-cairn-door, so nothing is published.
-    ports: !reset []
-    networks: [default, gateway, eoc-index, eoc-door]
+    networks: [default, gateway, eoc-index]
 
 networks:
   eoc-index:

@@ -16,7 +16,8 @@ crates/cairn-gateway-core  caps, ledger (SQL trait), model selection, OpenRouter
 hosts/server               binary `cairn` (VPS): axum/tokio glue, SQLite spool + consumer, scheduler timer, hub, static web
 hosts/gateway              binary `cairn-gateway` (VPS): gateway routes over a SQLite ledger; only spend credential
 workers/api, workers/gateway  legacy Cloudflare Workers glue (ADR 0008, superseded by 0014)
-Dockerfile, compose.yaml   VPS images (targets `cairn`, `gateway`) and services; deploy/ has env examples + Surreal init
+Dockerfile, compose.yaml   VPS images (targets `cairn`, `gateway`) and services (cairn-sign-in, cairn, cairn-gateway)
+deploy/                    env examples, sign-in.cfg (oauth2-proxy), surreal-init.surql, backup.sh (weekly → S3/R2)
 plugins/types/*            type plugins (plugin.json, schema.json, views.js)
 plugins/ai/*               AI capabilities (plugin.json, prompt.md, output.schema.json)
 schema/*.surql             SurrealDB schema, applied in order via POST /api/v1/admin/migrate
@@ -32,7 +33,8 @@ make check          # fmt check + clippy -D warnings + tests (run before every c
 make test           # cargo test --workspace (native; no Cloudflare or DB needed)
 make test-live      # SurrealHttpStore against a real SurrealDB (default: local `make db`)
 make db | make db-init | make run-gateway | make run-server | make web   # native local dev, see docs/deploy.md
-make vps-up | make vps-migrate | make vps-logs | make vps-backup       # on the VPS (compose.yaml + compose.eoc.yaml)
+make vps-up | make vps-migrate | make vps-logs                          # on the VPS (compose.yaml + compose.eoc.yaml)
+make vps-backup | make vps-backup-upload                                # deploy/backup.sh: local copy | + upload (weekly cron)
 make build-workers  # legacy: worker-build --release for both Workers (needs the wasm32 target)
 make coldstart      # CPU cost of a cold plugin-registry load, as wasm under Node
 make migrate TOKEN=<admin token> [API=https://…]   # or `cairn migrate` inside the container
@@ -79,9 +81,11 @@ If a change needs to break one of these, write an ADR in `docs/adr/` first and a
 - Update `docs/` whenever you change a contract (plugin manifest, task payload, gateway caps, queue message shapes).
 
 ## Secrets and config
-- **Secrets live only in `deploy/cairn.env` and `deploy/gateway.env` on the VPS** (gitignored, `chmod 600`), or `.dev.vars` for the legacy Workers. Never put them in `config/*.toml`, `compose.yaml`, the Dockerfile or code.
+- **Secrets live only in `deploy/*.env` and `deploy/secrets/` on the VPS** (`cairn.env`, `gateway.env`, `sign-in.env`, `backup.env`; gitignored, `chmod 600`), or `.dev.vars` for the legacy Workers. Never put them in `config/*.toml`, `compose.yaml`, the Dockerfile or code.
 - `cairn`: `CAIRN_TOKENS`, `SURREAL_USER`, `SURREAL_PASS` (a database-level user, `SURREAL_AUTH_LEVEL=database`), `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`. Non-secret: `SURREAL_URL`, `GATEWAY_URL`, `SPOOL_PATH`, `CAIRN_WEB_DIR`, `CAIRN_BIND`, `CAIRN_CONFIG`.
 - `cairn-gateway`: `CF_AIG_TOKEN` (production, AI Gateway BYOK) or `OPENROUTER_API_KEY` (local dev only), never both. Non-secret: `AIG_BASE_URL`, `AIG_BYOK_ALIAS`, `ENABLE_AFTER`, `LEDGER_PATH`, `GATEWAY_BIND`.
 - SurrealDB is EoC's `index` container (ADR 0014 amendment). Cairn uses only namespace `cairn` (`deploy/surreal-init.surql`), and never EoC's `eoc` namespace or EoC's root password, except once, by the operator, to run the init script.
-- **Cairn joins EoC only over `eoc-cairn-index` and `eoc-cairn-door` (`compose.eoc.yaml`). Never put `cairn` on EoC's `inside` network**, where EoC's `book` has no sign-in of its own, and never put the gateway on any EoC network. CI checks the merged compose config. Changes to EoC's side go in its repository, following its CLAUDE.md (record decisions in its `docs/DECISIONS.md`).
-- Cairn's namespace is not rebuildable, unlike EoC's part of the index: keep `make vps-backup` working.
+- **Cairn joins EoC only over `eoc-cairn-index` (`cairn` only) and `eoc-cairn-door` (`cairn-sign-in` only), in `compose.eoc.yaml`. Never put anything of Cairn's on EoC's `inside` network**, where EoC's `book` has no sign-in of its own, and never put the gateway on any EoC network. CI checks the merged compose config. Changes to EoC's side go in its repository, following its CLAUDE.md (record decisions in its `docs/DECISIONS.md`).
+- Cairn's namespace is not rebuildable, unlike EoC's part of the index: keep `deploy/backup.sh` working. Exports skip users (`--users false`: SurrealDB redacts hashes), and restores go through `surreal sql` as Cairn's user in a throwaway container. `history.txt` gets written wherever `surreal sql` runs, so never run it inside `index` or the checkout with a password or a backup.
+- **Everything from outside goes through `cairn-sign-in`** (ADR 0015). Only `cairn-sign-in` is on the door's network or published; `cairn` never is. Machine routes, the only ones that bypass the GitHub sign-in, are `cairn_app::api::MACHINE_ROUTES` and `skip_auth_routes` in `deploy/sign-in.cfg`. Change both together; `hosts/server/tests/sign_in_routes.rs` fails if they differ. Keep the list short: each entry must check its own credential.
+- Sign-in secrets: `deploy/sign-in.env` (client ID, redirect URL, `OAUTH2_PROXY_GITHUB_USERS`) and `deploy/secrets/` (client secret, cookie secret). Backups: `deploy/backup.env` (rclone S3/R2 settings, a key scoped to one private bucket).

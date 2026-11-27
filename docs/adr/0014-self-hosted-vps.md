@@ -42,7 +42,7 @@ The author decided that Cairn uses EoC's `index` SurrealDB server itself, sharin
 
 - `compose.eoc.yaml` (the standard deployment, `make vps-up`) joins `cairn` to two internal networks that EoC's compose file creates with fixed names: `eoc-cairn-index` (cairn ↔ index) and `eoc-cairn-door` (door ↔ cairn). It also drops the published port.
 - `cairn` never joins EoC's `inside` network, where EoC's unauthenticated `book` lives, and the gateway joins neither network.
-- EoC's door serves `CAIRN_ADDRESS` from `sites/cairn.caddy`. Cairn isn't behind EoC's GitHub sign-in, because its machine paths need tokens instead (open question, recorded in EoC's DECISIONS.md).
+- EoC's door serves `CAIRN_ADDRESS` from `sites/cairn.caddy`. Since ADR 0015 it proxies to Cairn's own GitHub sign-in (`cairn-sign-in`), not to `cairn`, so the door's network carries only the sign-in.
 - Cairn's namespace is backed up separately (`make vps-backup`, which runs `surreal export` as Cairn's own database user).
 - Before EoC raises the index version, Cairn's contract is run against that version locally (`make db SURREAL_VERSION=…`).
 - Memory limits on both containers (256 MB and 128 MB; measured at about 15 MB and 6 MB) keep Cairn from crowding EoC on a small server.

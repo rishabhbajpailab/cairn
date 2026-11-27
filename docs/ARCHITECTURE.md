@@ -2,7 +2,7 @@
 
 Cairn is a cloud-native "second brain". It captures anything from anywhere (REST, webhooks, Discord, scripts) into one typed graph of items, lets you organize that graph visually, and runs deterministic, budget-capped AI tasks over it.
 
-It runs on **a VPS, with Docker Compose** (ADR 0014), next to Engine of Creation and using that host's **SurrealDB 4.x**, with **OpenRouter** for models, reached through **Cloudflare AI Gateway** with the key stored there (BYOK). It started on Cloudflare Workers. `workers/*` still builds and is kept until the VPS deploy has run for a while.
+It runs on **a VPS, with Docker Compose** (ADR 0014), next to Engine of Creation and using that host's **SurrealDB 4.x**, with **OpenRouter** for models, reached through **Cloudflare AI Gateway** with the key stored there (BYOK). Everything from outside passes Cairn's own GitHub sign-in (`cairn-sign-in`, oauth2-proxy) except the machine routes, which check their own tokens (ADR 0015). It started on Cloudflare Workers. `workers/*` still builds and is kept until the VPS deploy has run for a while.
 
 > The name is a placeholder. Renaming means a find-and-replace on `cairn`.
 
@@ -14,7 +14,7 @@ It runs on **a VPS, with Docker Compose** (ADR 0014), next to Engine of Creation
  scripts ──────────▶│ /ingest/webhook/* ├─▶ resolve (pure) ─▶ SQLite spool (fsync) ──┐       │
  Discord ──────────▶│ /integrations/discord/interactions ┘     /data volume            │       │
  Browser ──────────▶│ /api/v1/* (items, edges, query)       spool consumer ◀──────────┘       │
- (via EoC's door)   │ /hub ──▶ in-process broadcast (WebSockets)  │ persist + notify          │
+ (door → sign-in)   │ /hub ──▶ in-process broadcast (WebSockets)  │ persist + notify          │
         ▲  ws       │                                             ▼                            │
         └───────────│ scheduler timer: sleeps until earliest reminder / cron task ─▶ spool    │
                     │ web app + plugins/types/*/views.js from /app/web                         │

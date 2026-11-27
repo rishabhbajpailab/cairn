@@ -1,6 +1,5 @@
 //! REST API. Keep handlers thin: auth → parse → service call → map errors.
-//! Mounted by the API Worker; static assets (web app, plugin views.js) are served by
-//! Workers static assets, not here.
+//! Mounted by `cairn` (hosts/server), which also serves the web app and plugin views.js.
 
 use crate::auth::Scope;
 use crate::error::ApiError;
@@ -15,6 +14,17 @@ use cairn_domain::{Actor, Edge, EdgeKind, Id, Item, Lifecycle, Op, OpKind, Query
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+
+/// Routes that machines call (phones, scripts, webhooks, Discord) and that therefore bypass
+/// the GitHub sign-in in front of Cairn (ADR 0015, `deploy/sign-in.cfg`). Each one checks a
+/// credential of its own. Everything else needs the sign-in as well as a token.
+/// `hosts/server/tests/sign_in_routes.rs` fails if `sign-in.cfg` and this list disagree.
+pub const MACHINE_ROUTES: &[(&str, &str)] = &[
+    ("POST", "/api/v1/capture"),
+    ("POST", "/ingest/webhook/{source}"),
+    ("POST", "/integrations/discord/interactions"),
+    ("GET", "/healthz"),
+];
 
 pub fn router() -> Router<AppState> {
     Router::new()

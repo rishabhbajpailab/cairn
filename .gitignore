@@ -14,3 +14,4 @@ web/src/lib/generated
 deploy/*.env
 .local/
 backups/
+deploy/secrets/

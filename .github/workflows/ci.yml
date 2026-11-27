@@ -55,16 +55,23 @@ jobs:
         run: |
           ! docker run --rm --entrypoint sh cairn-gateway:ci -c 'test -e /usr/local/bin/cairn'
           ! docker run --rm --entrypoint sh cairn:ci -c 'test -e /usr/local/bin/cairn-gateway'
-      - run: cp deploy/cairn.env.example deploy/cairn.env && cp deploy/gateway.env.example deploy/gateway.env && docker compose config -q
-      - name: sharing EoC never puts the gateway on EoC's networks, nor publishes cairn
+      - run: for f in cairn gateway sign-in; do cp deploy/$f.env.example deploy/$f.env; done && docker compose config -q
+      - name: network boundaries (ADR 0014, 0015)
         run: |
           docker compose -f compose.yaml -f compose.eoc.yaml config --format json > merged.json
+          docker compose config --format json > standalone.json
           python3 -c "
-          import json; d = json.load(open('merged.json'))
-          gw = set(d['services']['cairn-gateway']['networks']); c = d['services']['cairn']
-          assert not gw & {'eoc-index', 'eoc-door'}, gw
-          assert not c.get('ports'), c.get('ports')
-          assert 'inside' not in c['networks']
+          import json
+          m = json.load(open('merged.json'))['services']; s = json.load(open('standalone.json'))['services']
+          net = lambda d, n: set(d[n].get('networks', {}))
+          # Only the sign-in faces the door; cairn only reaches the index; the gateway no EoC network.
+          assert net(m, 'cairn-sign-in') == {'default', 'eoc-door'}, net(m, 'cairn-sign-in')
+          assert net(m, 'cairn') == {'default', 'gateway', 'eoc-index'}, net(m, 'cairn')
+          assert net(m, 'cairn-gateway') == {'gateway', 'gateway-egress'}, net(m, 'cairn-gateway')
+          # Nothing published when sharing EoC; standalone publishes only the sign-in, on loopback.
+          assert not any(v.get('ports') for v in m.values()), 'published with EoC'
+          pub = {n: v['ports'] for n, v in s.items() if v.get('ports')}
+          assert list(pub) == ['cairn-sign-in'] and all(p['host_ip'] == '127.0.0.1' for p in pub['cairn-sign-in']), pub
           "
 
   web:

@@ -1,4 +1,4 @@
-.PHONY: vps-up vps-migrate vps-logs vps-backup run-server run-gateway
+.PHONY: vps-up vps-migrate vps-logs vps-backup vps-backup-upload run-server run-gateway
 .PHONY: check fmt fmt-check lint test test-live build-workers check-wasm coldstart db-init web web-build types db dev-api dev-gateway deploy deploy-gateway deploy-api migrate hash
 
 API ?= https://cairn.example.dev
@@ -69,14 +69,11 @@ vps-migrate:                           ## apply schema/*.surql (idempotent)
 vps-logs:
 	$(COMPOSE) logs -f --tail=100
 
-vps-backup:                            ## export Cairn's namespace from EoC's index, as Cairn's own user
-	@mkdir -p backups
-	@SURREAL_USER="$$(sed -n 's/^SURREAL_USER=//p' deploy/cairn.env)"; \
-	  SURREAL_PASS="$$(sed -n 's/^SURREAL_PASS=//p' deploy/cairn.env)"; \
-	  docker compose --project-directory "$(EOC)" exec -T index /surreal export \
-	  --endpoint http://localhost:8000 --user "$$SURREAL_USER" --pass "$$SURREAL_PASS" --auth-level database \
-	  --namespace cairn --database main - > backups/cairn-$$(date +%F-%H%M).surql
-	@ls -l backups | tail -1
+vps-backup:                            ## export Cairn's namespace to backups/ (no upload)
+	@EOC="$(EOC)" sh deploy/backup.sh --no-upload
+
+vps-backup-upload:                     ## export, then upload to S3/R2 (deploy/backup.env); weekly from cron
+	@EOC="$(EOC)" sh deploy/backup.sh
 
 # Native, no containers, against `make db` (root/root). CAIRN_TOKENS comes from your shell,
 # e.g. CAIRN_TOKENS="me:admin:$$(printf %s devtoken | sha256sum | cut -d' ' -f1)".
