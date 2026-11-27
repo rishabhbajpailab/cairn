@@ -1,6 +1,6 @@
 # 0010: Scheduling with a single Durable Object alarm, no polling
 
-- **Status:** accepted
+- **Status:** accepted; superseded by 0014 (self-hosted VPS)
 - **Date:** 2026-11-23
 
 ## Context

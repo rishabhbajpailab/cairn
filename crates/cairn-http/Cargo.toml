@@ -10,6 +10,11 @@ async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+reqwest = { workspace = true, optional = true }
+
+[features]
+# Native HttpTransport for hosts/* (never for wasm).
+reqwest = ["dep:reqwest"]
 
 [lints]
 workspace = true

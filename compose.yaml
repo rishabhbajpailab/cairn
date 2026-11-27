@@ -1,0 +1,45 @@
+# Cairn next to Engine of Creation on the VPS (ADR 0014, docs/deploy.md).
+#   cp deploy/cairn.env.example deploy/cairn.env        # fill in
+#   cp deploy/gateway.env.example deploy/gateway.env    # fill in
+#   docker compose up -d --build && docker compose run --rm cairn migrate
+name: cairn
+
+services:
+  cairn:
+    build: { context: ., target: cairn }
+    image: cairn:latest
+    restart: unless-stopped
+    env_file: deploy/cairn.env
+    environment:
+      GATEWAY_URL: http://cairn-gateway:8788
+    volumes:
+      - cairn-spool:/data            # the capture spool: back it up with the gateway ledger
+    ports:
+      - "127.0.0.1:8787:8787"        # only the host's reverse proxy reaches this
+    networks: [default, gateway]
+    # SurrealDB on the host itself (SURREAL_URL=http://host.docker.internal:8000). Surreal
+    # must listen on an address the Docker bridge can reach, not only 127.0.0.1. If EoC runs
+    # Surreal in Docker instead, see compose.eoc-network.yaml.
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: [cairn-gateway]
+
+  cairn-gateway:
+    build: { context: ., target: gateway }
+    image: cairn-gateway:latest
+    restart: unless-stopped
+    env_file: deploy/gateway.env     # CF_AIG_TOKEN, AIG_BASE_URL, AIG_BYOK_ALIAS, ENABLE_AFTER
+    volumes:
+      - cairn-ledger:/data
+    # No ports. `gateway` is shared only with cairn; `gateway-egress` is its own way out to
+    # Cloudflare AI Gateway. Nothing else on the host can reach it.
+    networks: [gateway, gateway-egress]
+
+networks:
+  default: {}
+  gateway:
+    internal: true
+  gateway-egress: {}
+
+volumes:
+  cairn-spool: {}
+  cairn-ledger: {}

@@ -11,3 +11,5 @@ web/src/lib/generated
 *.sqlite
 *.sqlite-*
 .DS_Store
+deploy/*.env
+.local/

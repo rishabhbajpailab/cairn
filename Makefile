@@ -1,3 +1,4 @@
+.PHONY: vps-up vps-migrate vps-logs run-server run-gateway
 .PHONY: check fmt fmt-check lint test test-live build-workers check-wasm coldstart db-init web web-build types db dev-api dev-gateway deploy deploy-gateway deploy-api migrate hash
 
 API ?= https://cairn.example.dev
@@ -43,12 +44,35 @@ web-build:
 
 db:                                    ## local SurrealDB for `wrangler dev` (root/root, in-memory)
 	podman run --rm -d --name cairn-surreal -p 127.0.0.1:8000:8000 \
-	  docker.io/surrealdb/surrealdb:v3 start --user root --pass root memory
+	  docker.io/surrealdb/surrealdb:v4.0.1 start --user root --pass root memory
 
 db-init:                               ## create namespace `cairn` / database `main` (SurrealDB doesn't do it implicitly)
 	curl -fsS -X POST "$(SURREAL)/sql" -u root:root -H 'accept: application/json' \
 	  -d 'DEFINE NAMESPACE IF NOT EXISTS cairn; USE NS cairn; DEFINE DATABASE IF NOT EXISTS main;' >/dev/null && echo ok
 
+# ── VPS (ADR 0014, docs/deploy.md) ────────────────────────────────────────────
+vps-up:                                ## build + (re)start both containers
+	docker compose up -d --build
+
+vps-migrate:                           ## apply schema/*.surql (idempotent)
+	docker compose run --rm cairn migrate
+
+vps-logs:
+	docker compose logs -f --tail=100
+
+# Native, no containers, against `make db` (root/root). CAIRN_TOKENS comes from your shell,
+# e.g. CAIRN_TOKENS="me:admin:$$(printf %s devtoken | sha256sum | cut -d' ' -f1)".
+run-gateway:
+	@mkdir -p .local
+	LEDGER_PATH=.local/ledger.sqlite GATEWAY_BIND=127.0.0.1:8788 cargo run -p cairn-gateway-server
+
+run-server:
+	@mkdir -p .local
+	SURREAL_URL=$(SURREAL) SURREAL_USER=root SURREAL_PASS=root SURREAL_AUTH_LEVEL=root \
+	  SPOOL_PATH=.local/spool.sqlite CAIRN_WEB_DIR=web/dist CAIRN_BIND=127.0.0.1:8787 \
+	  GATEWAY_URL=http://127.0.0.1:8788 cargo run -p cairn-server
+
+# ── Legacy: Cloudflare Workers ────────────────────────────────────────────────
 dev-gateway:
 	cd workers/gateway && wrangler dev --port 8788
 

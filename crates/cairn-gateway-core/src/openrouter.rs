@@ -43,6 +43,33 @@ pub enum Upstream {
 }
 
 impl Upstream {
+    /// Pick the upstream from whatever credentials the host can see. Production is
+    /// `CF_AIG_TOKEN` + `AIG_BASE_URL` (AI Gateway, OpenRouter key stored via BYOK). Local dev
+    /// is `OPENROUTER_API_KEY` direct. Both at once is a misconfiguration: with BYOK, the raw
+    /// key must not be on the host at all.
+    pub fn from_credentials(
+        aig_token: Option<String>,
+        aig_base: Option<String>,
+        aig_alias: Option<String>,
+        openrouter_key: Option<String>,
+    ) -> Result<Self, String> {
+        let present = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
+        match (present(aig_token), present(openrouter_key)) {
+            (Some(_), Some(_)) => Err("both CF_AIG_TOKEN and OPENROUTER_API_KEY are set; with BYOK the raw \
+                                      OpenRouter key must not be on the gateway"
+                .into()),
+            (Some(token), None) => Ok(Upstream::AiGateway {
+                base: present(aig_base).ok_or("CF_AIG_TOKEN is set but AIG_BASE_URL is not")?,
+                token,
+                alias: present(aig_alias),
+            }),
+            (None, Some(key)) => Ok(Upstream::Direct { base: DIRECT_BASE.into(), key }),
+            (None, None) => {
+                Err("no upstream credential: set CF_AIG_TOKEN (or OPENROUTER_API_KEY for local dev)".into())
+            }
+        }
+    }
+
     fn base(&self) -> &str {
         match self {
             Upstream::AiGateway { base, .. } | Upstream::Direct { base, .. } => base.trim_end_matches('/'),
@@ -57,9 +84,8 @@ impl Upstream {
                 // `cf-aig-no-wholesale`: if no stored key matches (say, a mistyped alias), fail
                 // with error 2044 instead of falling back to Unified Billing, which would bill
                 // Cloudflare credits and bypass the OpenRouter key's limit.
-                let mut r = req
-                    .header("cf-aig-authorization", format!("Bearer {token}"))
-                    .header("cf-aig-no-wholesale", "true");
+                let mut r =
+                    req.header("cf-aig-authorization", format!("Bearer {token}")).header("cf-aig-no-wholesale", "true");
                 if let Some(a) = alias {
                     r = r.header("cf-aig-byok-alias", a.as_str());
                 }
@@ -245,6 +271,19 @@ impl<T: HttpTransport> OpenRouter<T> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn upstream_from_credentials() {
+        let s = |v: &str| Some(v.to_string());
+        assert!(matches!(
+            Upstream::from_credentials(s("t"), s("https://aig/openrouter/v1"), s("cairn"), None),
+            Ok(Upstream::AiGateway { alias: Some(_), .. })
+        ));
+        assert!(matches!(Upstream::from_credentials(None, None, None, s("sk")), Ok(Upstream::Direct { .. })));
+        assert!(Upstream::from_credentials(s("t"), s("b"), None, s("sk")).is_err(), "both is refused");
+        assert!(Upstream::from_credentials(s("t"), None, None, None).is_err(), "AIG needs a base URL");
+        assert!(Upstream::from_credentials(s(" "), None, None, s("")).is_err(), "blank counts as unset");
+    }
+
     use super::*;
 
     #[test]

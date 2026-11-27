@@ -279,9 +279,10 @@ impl<'a, S: LedgerSql> Ledger<'a, S> {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod sqlite {
-    //! rusqlite-backed `LedgerSql` for native tests (same SQL as the Durable Object).
+#[cfg(any(test, feature = "sqlite"))]
+pub mod sqlite {
+    //! rusqlite-backed `LedgerSql`: in memory for native tests, or a file for the VPS gateway
+    //! (`hosts/gateway`, feature `sqlite`). Same SQL as the Durable Object.
     use super::*;
     use rusqlite::types::{Value as SqlValue, ValueRef};
 
@@ -289,7 +290,22 @@ pub(crate) mod sqlite {
 
     impl MemSql {
         pub fn new() -> Self {
-            Self(rusqlite::Connection::open_in_memory().unwrap())
+            Self(rusqlite::Connection::open_in_memory().expect("in-memory sqlite"))
+        }
+
+        /// A durable ledger file: WAL, and `synchronous = FULL` so a reservation that
+        /// returned is on disk before the upstream call is made.
+        pub fn open(path: &std::path::Path) -> Result<Self, String> {
+            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            c.pragma_update(None, "journal_mode", "WAL").map_err(|e| e.to_string())?;
+            c.pragma_update(None, "synchronous", "FULL").map_err(|e| e.to_string())?;
+            Ok(Self(c))
+        }
+    }
+
+    impl Default for MemSql {
+        fn default() -> Self {
+            Self::new()
         }
     }
 

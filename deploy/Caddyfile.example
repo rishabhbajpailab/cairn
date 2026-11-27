@@ -1,0 +1,5 @@
+# Add to the host's Caddyfile (Caddy handles TLS and WebSocket upgrades for /hub).
+cairn.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8787
+}

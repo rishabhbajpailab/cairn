@@ -1,0 +1,13 @@
+# Use when EoC's SurrealDB runs in Docker: join cairn (only cairn, never the gateway) to
+# EoC's network and point SURREAL_URL at its service name, e.g.
+#   SURREAL_URL=http://surrealdb:8000
+#   docker compose -f compose.yaml -f compose.eoc-network.yaml up -d
+# Find the network name with `docker network ls` (often `<eoc-project>_default`).
+services:
+  cairn:
+    networks: [default, gateway, eoc]
+
+networks:
+  eoc:
+    external: true
+    name: eoc_default   # ← change to EoC's network

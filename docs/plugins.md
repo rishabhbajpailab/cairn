@@ -1,8 +1,8 @@
 # Plugins
 
-There are two kinds of plugin. Both live in `plugins/`, and each one is a folder with a `plugin.json` file. Workers have no filesystem, so the whole `plugins/` directory is **compiled into the API Worker** (`include_dir!`, in `cairn-plugins-embedded`), and `web/scripts/copy-plugins.mjs` copies each `views.js` into the static assets. Adding or changing a plugin therefore means a deploy.
+There are two kinds of plugin. Both live in `plugins/`, and each one is a folder with a `plugin.json` file. The whole `plugins/` directory is **compiled into `cairn`** (`include_dir!`, in `cairn-plugins-embedded`; this started because Workers have no filesystem), and `web/scripts/copy-plugins.mjs` copies each `views.js` into the static assets. Adding or changing a plugin therefore means a deploy.
 
-Every schema a manifest names (`schema` for types, `output` for AI capabilities) is also **compiled to Rust at build time** by `cairn-plugins-embedded/build.rs`, so the Worker never compiles a JSON Schema at runtime. An invalid schema is a build error. The filesystem loader (`FsSource`, used by native tests and tooling) still compiles at load time. See [deploy.md § Plan and CPU limits](deploy.md#plan-and-cpu-limits).
+Every schema a manifest names (`schema` for types, `output` for AI capabilities) is also **compiled to Rust at build time** by `cairn-plugins-embedded/build.rs`, so `cairn` never compiles a JSON Schema at runtime. An invalid schema is a build error. The filesystem loader (`FsSource`, used by native tests and tooling) still compiles at load time. See ADR 0013.
 
 ```
 plugins/

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Cairn is a single-user, **cloud-native** "second brain" on **Cloudflare Workers + Durable Objects + Queues**, with **SurrealDB on Surreal Cloud** and **OpenRouter** behind an isolated gateway Worker. The gateway reaches OpenRouter through **Cloudflare AI Gateway**, using a key stored there (BYOK). It captures items from REST, webhooks and Discord into a typed graph, shows them on a visual canvas, and runs deterministic, budget-capped AI tasks over them. Start with `docs/ARCHITECTURE.md`. The current milestone is in `docs/ROADMAP.md` (M1: first live run against Surreal, plus wasm builds).
+Cairn is a single-user "second brain". It runs on **a VPS with Docker Compose** (ADR 0014), next to Engine of Creation and using that host's **SurrealDB 4.x**, with **OpenRouter** behind an isolated gateway process. The gateway reaches OpenRouter through **Cloudflare AI Gateway**, using a key stored there (BYOK). It captures items from REST, webhooks and Discord into a typed graph, shows them on a visual canvas, and runs deterministic, budget-capped AI tasks over them. Start with `docs/ARCHITECTURE.md`. The current milestone is in `docs/ROADMAP.md` (M1: first VPS deploy). The original Cloudflare Workers glue (`workers/*`) still builds but is legacy.
 
 ## Layout
 ```
@@ -13,12 +13,14 @@ crates/cairn-scheduler     TaskDef, DAG lint, cron, next_fire_after, run keys
 crates/cairn-gc            lifecycle planner (pure)
 crates/cairn-app           platform-agnostic app: router, ingest, consumer, reminders, Discord, ai_apply
 crates/cairn-gateway-core  caps, ledger (SQL trait), model selection, OpenRouter client, service flow
-workers/api                Worker glue: bindings → ports; fetch/queue/scheduled; Scheduler + Hub DOs
-workers/gateway            Worker glue: Ledger DO, Service-Binding-only entry, fetch transport
+hosts/server               binary `cairn` (VPS): axum/tokio glue, SQLite spool + consumer, scheduler timer, hub, static web
+hosts/gateway              binary `cairn-gateway` (VPS): gateway routes over a SQLite ledger; only spend credential
+workers/api, workers/gateway  legacy Cloudflare Workers glue (ADR 0008, superseded by 0014)
+Dockerfile, compose.yaml   VPS images (targets `cairn`, `gateway`) and services; deploy/ has env examples + Surreal init
 plugins/types/*            type plugins (plugin.json, schema.json, views.js)
 plugins/ai/*               AI capabilities (plugin.json, prompt.md, output.schema.json)
 schema/*.surql             SurrealDB schema, applied in order via POST /api/v1/admin/migrate
-config/cairn.toml          API Worker config (committed, embedded at build time)
+config/cairn.toml          app config (committed, embedded at build time; CAIRN_CONFIG overrides on the VPS)
 config/gateway.toml        spend caps (committed, compiled into the gateway)
 web/                       Vite + Svelte 5 + @xyflow/svelte, served as Workers static assets
 docs/                      architecture, contracts, ADRs, roadmap, deploy
@@ -28,38 +30,41 @@ docs/                      architecture, contracts, ADRs, roadmap, deploy
 ```
 make check          # fmt check + clippy -D warnings + tests (run before every commit)
 make test           # cargo test --workspace (native; no Cloudflare or DB needed)
-make build-workers  # worker-build --release for both Workers (needs the wasm32 target)
-make dev-api | make dev-gateway | make web | make db     # local dev, see docs/deploy.md
+make test-live      # SurrealHttpStore against a real SurrealDB (default: local `make db`)
+make db | make db-init | make run-gateway | make run-server | make web   # native local dev, see docs/deploy.md
+make vps-up | make vps-migrate | make vps-logs                          # on the VPS (docker compose)
+make build-workers  # legacy: worker-build --release for both Workers (needs the wasm32 target)
 make coldstart      # CPU cost of a cold plugin-registry load, as wasm under Node
-make deploy         # web build → gateway → api
-make migrate TOKEN=<admin token> [API=https://…]
+make migrate TOKEN=<admin token> [API=https://…]   # or `cairn migrate` inside the container
 make types          # TS types from plugins/types/*/schema.json
 make hash           # sha256 of a token, for CAIRN_TOKENS
 ```
 
 ## Where code goes
-- **Logic goes in the libraries, never in `workers/*`.** Worker crates only adapt bindings (Queue, DO stub, Service Binding, fetch) to the traits in `cairn_app::ports`, `cairn_http::HttpTransport`, `cairn_gateway_core::service::LedgerPort` and `ledger::LedgerSql`. If you're writing an `if` that isn't about a binding, it belongs in a library with a native test.
-- **Everything must compile to `wasm32-unknown-unknown`:**
+- **Logic goes in the libraries, never in `hosts/*` or `workers/*`.** Host crates only adapt the platform (tokio, SQLite, HTTP; or Cloudflare bindings for the legacy Workers) to the traits in `cairn_app::ports`, `cairn_http::HttpTransport`, `cairn_gateway_core::service::LedgerPort` and `ledger::LedgerSql`. If you're writing an `if` that isn't about the platform, it belongs in a library with a native test. Host infrastructure itself (the spool's retry and dead-letter bookkeeping, the scheduler loop) lives in `hosts/server` with its own tests.
+- **`hosts/server` must never depend on `cairn-gateway-core`, and `hosts/gateway` must never depend on `cairn-store` or `cairn-app`.** CI checks both.
+- **Libraries must still compile to `wasm32-unknown-unknown`** (keeps them portable and the legacy Workers building). Native-only code goes behind a feature that only `hosts/*` enables, like `cairn-http/reqwest` and `cairn-gateway-core/sqlite`:
   - no tokio runtime and no filesystem in library code
   - no `std::time::Instant`; use `chrono::Utc::now()`
   - no blocking I/O
   - tokio is a dev-dependency only
-- **Keep the cold path cheap.** We plan on the Workers Paid plan, but a new isolate's first request should still stay well under 10 ms of CPU. Don't compile JSON Schemas or do other heavy setup at runtime. Do it at build time (see `cairn-plugins-embedded`), and check with `make coldstart`.
-- **Durable Object SQLite forbids `BEGIN`.** The ledger relies on the DO handling one request at a time, plus no awaits between the check and the write. Keep it that way.
+- **Keep startup cheap.** Precompile at build time rather than at runtime (see `cairn-plugins-embedded`, ADR 0013). `make coldstart` measures it.
+- **The ledger relies on serialized access with no awaits between check and write.** On the VPS that's one mutex around a synchronous `Ledger` call; on Workers it was the DO, whose SQLite forbids `BEGIN`. Keep `Ledger` methods synchronous.
 
 ## Invariants (docs/ARCHITECTURE.md § Invariants)
-1. **A capture is never lost after auth.** Resolve purely, enqueue to CAPTURES, reply 202. The consumer is idempotent (Conflict counts as done).
+1. **A capture is never lost after auth.** Resolve purely, commit to the SQLite spool (fsync), reply 202. The consumer is idempotent (Conflict counts as done) and retries; exhausted rows are kept as dead, never dropped.
 2. Every mutation goes through `Store::apply(Vec<Op>)`. Payload changes go through `cairn_app::items::patch_payload`, which validates and recomputes idx/title.
 3. The core never interprets `item.payload`. It reads only the plugin-declared `idx` fields.
 4. Layout lives on `View`, never on `Item`.
-5. **Only `workers/gateway` binds a spend credential, and only `cairn-gateway-core` talks to the LLM upstream.**
-   - In production the OpenRouter key lives in Cloudflare Secrets Store (AI Gateway BYOK), and the gateway binds only `CF_AIG_TOKEN`. `OPENROUTER_API_KEY` is for local dev only. Never bind both: the gateway refuses.
-   - CI greps for `openrouter.ai`, `gateway.ai.cloudflare.com` and `cf-aig-authorization` outside those two crates.
-   - The API Worker refuses to serve if it can see either credential.
-6. **Code can only tighten spend limits.** Never add endpoints, bindings or vars that raise caps, re-enable the gateway, or give the API Worker access to the Ledger DO. Caps live in `config/gateway.toml`, and lifting a disable requires a deploy with a later `ENABLE_AFTER`.
-7. No LLM in orchestration. The Scheduler DO and TASKS consumer are deterministic, and runs can't create tasks or runs.
+5. **Only the gateway (`hosts/gateway`, legacy `workers/gateway`) holds a spend credential, and only `cairn-gateway-core` talks to the LLM upstream.**
+   - In production the OpenRouter key lives in Cloudflare Secrets Store (AI Gateway BYOK), and the gateway gets only `CF_AIG_TOKEN` (`deploy/gateway.env`). `OPENROUTER_API_KEY` is for local dev only. Never set both: the gateway refuses.
+   - The gateway container has no published port and shares a private network only with `cairn`.
+   - CI greps for `openrouter.ai`, `gateway.ai.cloudflare.com` and `cf-aig-authorization` outside the gateway crates.
+   - `cairn` refuses to start if it can see either credential. The gateway refuses to start if it can see the Surreal credentials or `CAIRN_TOKENS`.
+6. **Code can only tighten spend limits.** Never add endpoints, env vars or mounts that raise caps, re-enable the gateway, or give `cairn` access to the ledger volume or the gateway env. Caps live in `config/gateway.toml` (compiled in). Lifting a disable requires an operator to set a later `ENABLE_AFTER` and recreate the gateway container.
+7. No LLM in orchestration. The scheduler timer and tasks consumer are deterministic, and runs can't create tasks or runs.
 8. AI output → JSON Schema → Rust `ai_apply` converter → whitelisted ops → core validation. Never apply model output directly.
-9. **Nothing polls.** Scheduling uses the Scheduler DO alarm plus `rearm` on writes. Live updates come from the Hub DO. Don't add minute loops.
+9. **Nothing polls.** The scheduler sleeps until the next due event (hourly backstop) and `rearm` wakes it. The spool consumer sleeps until notified or a retry is due. Live updates come from the hub. Don't add minute loops.
 10. GC purges only trashed items past retention, never pinned items or items tagged `keep`, and always cascades.
 
 If a change needs to break one of these, write an ADR in `docs/adr/` first and ask.
@@ -74,6 +79,7 @@ If a change needs to break one of these, write an ADR in `docs/adr/` first and a
 - Update `docs/` whenever you change a contract (plugin manifest, task payload, gateway caps, queue message shapes).
 
 ## Secrets and config
-- **Secrets are only ever Worker secrets** (`wrangler secret put`), or `.dev.vars` locally (gitignored). Never put them in `config/*.toml`, `wrangler.toml` or code.
-- API Worker secrets: `CAIRN_TOKENS`, `SURREAL_USER`, `SURREAL_PASS`, `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`.
-- Gateway Worker secret: `CF_AIG_TOKEN` (production, AI Gateway BYOK) or `OPENROUTER_API_KEY` (local dev only), never both. Vars: `AIG_BASE_URL`, `AIG_BYOK_ALIAS`, `ENABLE_AFTER`.
+- **Secrets live only in `deploy/cairn.env` and `deploy/gateway.env` on the VPS** (gitignored, `chmod 600`), or `.dev.vars` for the legacy Workers. Never put them in `config/*.toml`, `compose.yaml`, the Dockerfile or code.
+- `cairn`: `CAIRN_TOKENS`, `SURREAL_USER`, `SURREAL_PASS` (a database-level user, `SURREAL_AUTH_LEVEL=database`), `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`. Non-secret: `SURREAL_URL`, `GATEWAY_URL`, `SPOOL_PATH`, `CAIRN_WEB_DIR`, `CAIRN_BIND`, `CAIRN_CONFIG`.
+- `cairn-gateway`: `CF_AIG_TOKEN` (production, AI Gateway BYOK) or `OPENROUTER_API_KEY` (local dev only), never both. Non-secret: `AIG_BASE_URL`, `AIG_BYOK_ALIAS`, `ENABLE_AFTER`, `LEDGER_PATH`, `GATEWAY_BIND`.
+- SurrealDB is shared with EoC. Cairn uses only namespace `cairn` (`deploy/surreal-init.surql`), and never EoC's namespaces or root credentials in production.

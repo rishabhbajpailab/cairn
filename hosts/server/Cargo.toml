@@ -1,0 +1,36 @@
+[package]
+name = "cairn-server"
+description = "Cairn on the VPS (ADR 0014): HTTP API, SQLite capture/task spool, scheduler timer, live-update hub, static web app."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "cairn"
+path = "src/main.rs"
+
+[dependencies]
+cairn-app.workspace = true
+cairn-domain.workspace = true
+cairn-http = { workspace = true, features = ["reqwest"] }
+cairn-plugins.workspace = true
+cairn-plugins-embedded.workspace = true
+cairn-store.workspace = true
+axum = { workspace = true, features = ["tokio", "http1", "ws"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tower-http.workspace = true
+rusqlite.workspace = true
+include_dir.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+http-body-util.workspace = true
+
+[lints]
+workspace = true

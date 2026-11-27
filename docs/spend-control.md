@@ -1,11 +1,11 @@
 # Spend control
 
-**Requirement:** no code path can make AI spend exceed the configured limits. That includes plugins, tasks, bugs and a compromised API Worker.
+**Requirement:** no code path can make AI spend exceed the configured limits. That includes plugins, tasks, bugs and a compromised `cairn` process.
 
-**Rule:** code can only *tighten* limits. Loosening any limit means a `wrangler deploy` made with your Cloudflare credentials, or a change in a dashboard (Cloudflare or OpenRouter). The app holds no credential for either.
+**Rule:** code can only *tighten* limits. Loosening any limit means an operator rebuilding or recreating the gateway container on the host, or a change in a dashboard (Cloudflare or OpenRouter). The app holds no credential for either.
 
 ```
-API Worker ──Service Binding──▶ gateway Worker ──cf-aig-authorization──▶ AI Gateway ──stored key──▶ OpenRouter
+cairn ──private network──▶ cairn-gateway ──cf-aig-authorization──▶ AI Gateway ──stored key──▶ OpenRouter
                                 (ledger, caps,                          (spend-limit rules,         (key credit
                                  allowlist)                              logs; BYOK key)             limit)
 ```
@@ -16,7 +16,7 @@ There are three independent caps, enforced by three different systems.
 
 | Control | Where it's set | Why code can't bypass it |
 |---|---|---|
-| A **dedicated Cairn key** with a credit limit and reset | OpenRouter dashboard | The key can't change its own limit, and no Worker can even read it (BYOK) |
+| A **dedicated Cairn key** with a credit limit and reset | OpenRouter dashboard | The key can't change its own limit, and nothing on the VPS can even read it (BYOK) |
 | **No management key anywhere** | Policy, checked hourly | Management keys can raise limits. The gateway calls `GET /key` and disables itself if the key is a management key or has `limit: null` (see `key_check` below). |
 | Small prepaid balance, auto top-up **off** | OpenRouter billing | Money that isn't in the account can't be spent |
 | Account-wide provider allowlist | OpenRouter privacy settings | It acts as a ceiling over any per-request `only` list |
@@ -25,19 +25,19 @@ Keep Cairn's key separate from other apps, using AI Gateway's `cairn` alias. The
 
 ## Layer 2: Cloudflare AI Gateway (BYOK keystore + outer cap)
 
-- **The OpenRouter key is stored in Secrets Store**, as the gateway's Provider Key with alias `cairn`. AI Gateway injects it only when a request arrives *without* a provider `Authorization` header. The gateway Worker never sends one, so no Worker or log ever holds the raw key.
-- **`CF_AIG_TOKEN`** (an auth token for the `cairn` gateway) is the only credential the gateway Worker holds. Treat it as a spend credential: anyone with it can spend through the stored key, up to the limits in this layer and layer 1.
-- **A spend-limit rule** sits slightly above `global.per_day_usd`. AI Gateway checks it before forwarding each request, and records cost after the request completes. Its enforcement is eventually consistent, so it can be briefly overshot by a burst. That's why it's the outer net and not the primary control. When it blocks, AI Gateway returns 429. The gateway Worker then stops trying further models and releases the reservation at $0.
+- **The OpenRouter key is stored in Secrets Store**, as the gateway's Provider Key with alias `cairn`. AI Gateway injects it only when a request arrives *without* a provider `Authorization` header. The gateway never sends one, so nothing on the VPS, and no log, ever holds the raw key.
+- **`CF_AIG_TOKEN`** (an auth token for the `cairn` gateway) is the only credential the gateway holds. Treat it as a spend credential: anyone with it can spend through the stored key, up to the limits in this layer and layer 1.
+- **A spend-limit rule** sits slightly above `global.per_day_usd`. AI Gateway checks it before forwarding each request, and records cost after the request completes. Its enforcement is eventually consistent, so it can be briefly overshot by a burst. That's why it's the outer net and not the primary control. When it blocks, AI Gateway returns 429. The gateway then stops trying further models and releases the reservation at $0.
 - **Fallback routing on spend limits stays off,** because a cap must block, not reroute.
 - **Every request carries `cf-aig-no-wholesale: true`,** so AI Gateway never falls back to Unified Billing (Cloudflare credits) when the stored key is missing. That fallback would bypass the OpenRouter key limit.
 - **Every request carries `cf-aig-metadata: {app, task, plugin}`,** so analytics and optional per-task rules can split spend by task and plugin.
 
-## Layer 3: the `cairn-gateway` Worker (primary, exact control)
+## Layer 3: `cairn-gateway` (primary, exact control)
 
-- **No public URL.** `workers_dev = false`, no routes and no preview URLs. The only way in is the API Worker's `GATEWAY` Service Binding.
-- **Sole spend credential.** It binds `CF_AIG_TOKEN` in production, or `OPENROUTER_API_KEY` for local dev only. It refuses to start if both are bound. The API Worker refuses to serve if it can see either.
-- **Caps are compiled in.** `config/gateway.toml` is built into the Worker, so raising a cap means editing the file and running `make deploy-gateway`.
-- **Ledger Durable Object** (SQLite, a single instance). It processes one request at a time with no awaits between the cap check and the insert, so reservations can't race past a cap.
+- **No published port.** The container shares an `internal` compose network with `cairn` only, and has a separate egress network for AI Gateway. Nothing else on the host can reach it.
+- **Sole spend credential.** It gets `CF_AIG_TOKEN` in production (`deploy/gateway.env`), or `OPENROUTER_API_KEY` for local dev only. It refuses to start if both are set, or if it can see the Surreal credentials. `cairn` refuses to start if it can see either spend credential.
+- **Caps are compiled in.** `config/gateway.toml` is built into the gateway binary, so raising a cap means editing the file and rebuilding the container.
+- **Ledger in SQLite** on the gateway's own volume (`synchronous = FULL`), behind one mutex. Every ledger call is synchronous, with nothing between the cap check and the insert, so reservations can't race past a cap. That's the same guarantee the Ledger Durable Object gave.
 - **Flow for each request** (`cairn-gateway-core::service::complete`):
   1. **Check the key**, at most hourly. A management or uncapped key disables the gateway. What happens if the check is *unreachable* depends on `key_check`.
   2. **Order the task's models.** The gateway may drop or reorder them. It never adds one.

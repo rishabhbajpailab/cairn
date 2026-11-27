@@ -14,9 +14,17 @@ jobs:
       # Invariant 5: only the gateway talks to OpenRouter / AI Gateway.
       - name: upstream isolation
         run: |
-          if grep -rIl -e "openrouter.ai" -e "gateway.ai.cloudflare.com" -e "cf-aig-authorization" crates workers --include=*.rs \
-             | grep -v -e "^crates/cairn-gateway-core/" -e "^workers/gateway/"; then
+          if grep -rIl -e "openrouter.ai" -e "gateway.ai.cloudflare.com" -e "cf-aig-authorization" crates workers hosts --include=*.rs \
+             | grep -v -e "^crates/cairn-gateway-core/" -e "^workers/gateway/" -e "^hosts/gateway/"; then
             echo "LLM upstream referenced outside the gateway"; exit 1; fi
+      # Invariant 5 on the VPS: only the gateway binary may link the gateway core, and it
+      # must not link the store.
+      - name: host isolation
+        run: |
+          if cargo tree -p cairn-server -e normal | grep -q cairn-gateway-core; then
+            echo "cairn-server depends on cairn-gateway-core"; exit 1; fi
+          if cargo tree -p cairn-gateway-server -e normal | grep -q -e cairn-store -e cairn-app; then
+            echo "cairn-gateway-server can reach the main database"; exit 1; fi
       # Invariant 6: the API Worker must never bind the ledger or the key.
       - name: gateway isolation
         run: |
@@ -34,6 +42,20 @@ jobs:
       - run: cargo install -q worker-build
       - run: cd workers/gateway && worker-build --release
       - run: cd workers/api && worker-build --release
+
+  # The VPS images (ADR 0014). Built, not pushed.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker buildx build --target cairn -t cairn:ci --load .
+      - run: docker buildx build --target gateway -t cairn-gateway:ci --load .
+      - name: gateway image has no cairn binary, and vice versa
+        run: |
+          ! docker run --rm --entrypoint sh cairn-gateway:ci -c 'test -e /usr/local/bin/cairn'
+          ! docker run --rm --entrypoint sh cairn:ci -c 'test -e /usr/local/bin/cairn-gateway'
+      - run: cp deploy/cairn.env.example deploy/cairn.env && cp deploy/gateway.env.example deploy/gateway.env && docker compose config -q
 
   web:
     runs-on: ubuntu-latest

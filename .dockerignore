@@ -1,0 +1,10 @@
+target
+**/node_modules
+web/dist
+web/public/plugins
+web/src/lib/generated
+**/build
+**/.wrangler
+**/.dev.vars
+deploy/*.env
+.git
