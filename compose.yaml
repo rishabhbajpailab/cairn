@@ -1,7 +1,9 @@
-# Cairn next to Engine of Creation on the VPS (ADR 0014, docs/deploy.md).
+# Cairn on the VPS (ADR 0014, docs/deploy.md). This file alone runs Cairn on its own,
+# published on 127.0.0.1:8787. The standard deployment shares Engine of Creation's
+# SurrealDB and door: add compose.eoc.yaml (`make vps-up` does).
 #   cp deploy/cairn.env.example deploy/cairn.env        # fill in
 #   cp deploy/gateway.env.example deploy/gateway.env    # fill in
-#   docker compose up -d --build && docker compose run --rm cairn migrate
+#   make vps-up && make vps-migrate
 name: cairn
 
 services:
@@ -15,13 +17,15 @@ services:
     volumes:
       - cairn-spool:/data            # the capture spool: back it up with the gateway ledger
     ports:
-      - "127.0.0.1:8787:8787"        # only the host's reverse proxy reaches this
+      - "127.0.0.1:8787:8787"        # standalone only; compose.eoc.yaml removes it
     networks: [default, gateway]
-    # SurrealDB on the host itself (SURREAL_URL=http://host.docker.internal:8000). Surreal
-    # must listen on an address the Docker bridge can reach, not only 127.0.0.1. If EoC runs
-    # Surreal in Docker instead, see compose.eoc-network.yaml.
+    # Standalone with SurrealDB on the host itself: SURREAL_URL=http://host.docker.internal:8000
+    # (Surreal must listen where the Docker bridge can reach it, not only 127.0.0.1).
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on: [cairn-gateway]
+    # The server is shared with EoC (1 GB in its sizing). Measured: ~15 MB. The limit keeps a
+    # runaway from crowding out the book; raise it if Cairn ever needs more.
+    mem_limit: 256m
 
   cairn-gateway:
     build: { context: ., target: gateway }
@@ -33,6 +37,7 @@ services:
     # No ports. `gateway` is shared only with cairn; `gateway-egress` is its own way out to
     # Cloudflare AI Gateway. Nothing else on the host can reach it.
     networks: [gateway, gateway-egress]
+    mem_limit: 128m                  # measured: ~6 MB
 
 networks:
   default: {}

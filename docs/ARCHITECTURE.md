@@ -14,7 +14,7 @@ It runs on **a VPS, with Docker Compose** (ADR 0014), next to Engine of Creation
  scripts ──────────▶│ /ingest/webhook/* ├─▶ resolve (pure) ─▶ SQLite spool (fsync) ──┐       │
  Discord ──────────▶│ /integrations/discord/interactions ┘     /data volume            │       │
  Browser ──────────▶│ /api/v1/* (items, edges, query)       spool consumer ◀──────────┘       │
- (via Caddy/nginx)  │ /hub ──▶ in-process broadcast (WebSockets)  │ persist + notify          │
+ (via EoC's door)   │ /hub ──▶ in-process broadcast (WebSockets)  │ persist + notify          │
         ▲  ws       │                                             ▼                            │
         └───────────│ scheduler timer: sleeps until earliest reminder / cron task ─▶ spool    │
                     │ web app + plugins/types/*/views.js from /app/web                         │
@@ -22,8 +22,8 @@ It runs on **a VPS, with Docker Compose** (ADR 0014), next to Engine of Creation
                             │ HTTP /rpc, CBOR (database-level user)       │ private network "gateway"
                             ▼                                             ▼
                     ┌────────────────────┐           ┌──────── cairn-gateway (container) ──────┐
-                    │ SurrealDB 4.x      │           │ only holder of a spend credential        │
-                    │ (shared with EoC;  │           │ no published port · caps compiled in     │
+                    │ EoC's `index`      │           │ only holder of a spend credential        │
+                    │ (SurrealDB 4.0.1;  │           │ no published port · caps compiled in     │
                     │  namespace cairn)  │           │ ledger: SQLite on its own volume         │
                     └────────────────────┘           └───────────────────┬──────────────────────┘
                                                                          │ cf-aig-authorization (no provider key)

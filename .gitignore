@@ -13,3 +13,4 @@ web/src/lib/generated
 .DS_Store
 deploy/*.env
 .local/
+backups/

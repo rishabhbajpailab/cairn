@@ -56,6 +56,16 @@ jobs:
           ! docker run --rm --entrypoint sh cairn-gateway:ci -c 'test -e /usr/local/bin/cairn'
           ! docker run --rm --entrypoint sh cairn:ci -c 'test -e /usr/local/bin/cairn-gateway'
       - run: cp deploy/cairn.env.example deploy/cairn.env && cp deploy/gateway.env.example deploy/gateway.env && docker compose config -q
+      - name: sharing EoC never puts the gateway on EoC's networks, nor publishes cairn
+        run: |
+          docker compose -f compose.yaml -f compose.eoc.yaml config --format json > merged.json
+          python3 -c "
+          import json; d = json.load(open('merged.json'))
+          gw = set(d['services']['cairn-gateway']['networks']); c = d['services']['cairn']
+          assert not gw & {'eoc-index', 'eoc-door'}, gw
+          assert not c.get('ports'), c.get('ports')
+          assert 'inside' not in c['networks']
+          "
 
   web:
     runs-on: ubuntu-latest

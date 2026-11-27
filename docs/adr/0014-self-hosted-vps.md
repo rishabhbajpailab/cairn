@@ -22,9 +22,9 @@ Two native binaries, run with Docker Compose next to EoC, behind a reverse proxy
 | Static assets | `web/dist` served by `cairn` (SPA fallback) |
 | Gateway Worker + Service Binding | `cairn-gateway` (`hosts/gateway`), its own container on a private network shared only with `cairn`, with no published port |
 | Ledger DO (SQLite) | SQLite file on the gateway's own volume, behind a mutex |
-| Surreal Cloud | EoC's local SurrealDB 4.x. Cairn gets its own namespace (`cairn`) and a database-level user, and never touches EoC's namespaces |
+| Surreal Cloud | EoC's `index` container (SurrealDB 4.0.1). Cairn gets its own namespace (`cairn`) and a database-level user, and never touches EoC's `eoc` namespace |
 
-Ingress is a direct reverse proxy on the host (Caddy or nginx, with TLS). Only `cairn` is published, and only on `127.0.0.1`. Cloudflare Access no longer sits in front, so every route relies on Cairn's own token auth (it already did; Access was defence in depth).
+Ingress is a reverse proxy with TLS: EoC's door (see the amendment below), or the host's own proxy to `127.0.0.1:8787` when running standalone. Cloudflare Access no longer sits in front, so every route relies on Cairn's own token auth (it already did; Access was defence in depth).
 
 AI still goes through Cloudflare AI Gateway with the OpenRouter key stored there (BYOK, ADR 0012). That's plain HTTPS and doesn't depend on where Cairn runs.
 
@@ -35,6 +35,17 @@ AI still goes through Cloudflare AI Gateway with the OpenRouter key stored there
 6. **Code can only tighten.** Caps are still compiled into the gateway binary from `config/gateway.toml`. `ENABLE_AFTER` is in the gateway's env file, so lifting a disable means an operator editing that file and recreating the container. The `cairn` container can't reach the gateway's env or volume. There's still no enable endpoint.
 7. **Durable Objects handled one request at a time.** The SQLite connection behind a mutex gives the same guarantee, and the `Ledger` calls are synchronous, so nothing can interleave between check and write.
 9. **Nothing polls.** The scheduler sleeps until the next event (or the hourly backstop) and is woken early by `rearm`. The spool consumer sleeps until it's notified, or until the next retry is due.
+
+## Amendment, 2026-11-27: sharing EoC's index and door
+
+The author decided that Cairn uses EoC's `index` SurrealDB server itself, sharing the load rather than running a second database, and goes through EoC's door, which owns ports 80 and 443. EoC's index is disposable *by design* (EoC must survive losing it), but it's not treated as disposable in operation.
+
+- `compose.eoc.yaml` (the standard deployment, `make vps-up`) joins `cairn` to two internal networks that EoC's compose file creates with fixed names: `eoc-cairn-index` (cairn ↔ index) and `eoc-cairn-door` (door ↔ cairn). It also drops the published port.
+- `cairn` never joins EoC's `inside` network, where EoC's unauthenticated `book` lives, and the gateway joins neither network.
+- EoC's door serves `CAIRN_ADDRESS` from `sites/cairn.caddy`. Cairn isn't behind EoC's GitHub sign-in, because its machine paths need tokens instead (open question, recorded in EoC's DECISIONS.md).
+- Cairn's namespace is backed up separately (`make vps-backup`, which runs `surreal export` as Cairn's own database user).
+- Before EoC raises the index version, Cairn's contract is run against that version locally (`make db SURREAL_VERSION=…`).
+- Memory limits on both containers (256 MB and 128 MB; measured at about 15 MB and 6 MB) keep Cairn from crowding EoC on a small server.
 
 ## Consequences
 

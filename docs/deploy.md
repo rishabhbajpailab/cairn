@@ -1,64 +1,65 @@
 # Deploy
 
-Cairn runs on the VPS that also hosts Engine of Creation (EoC), with Docker Compose (ADR 0014), and uses that host's SurrealDB 4.x. Two containers:
+Cairn runs on the VPS that also hosts Engine of Creation (EoC), with Docker Compose (ADR 0014). It shares EoC's SurrealDB (EoC's `index` container, 4.0.1) and EoC's door (Caddy, the only thing with ports 80 and 443). Two containers:
 
-- **`cairn`**: the API, the capture/task spool, the scheduler, live updates, and the web app. It's published on `127.0.0.1:8787` only.
+- **`cairn`**: the API, the capture/task spool, the scheduler, live updates, and the web app. No published port: EoC's door reaches it over a network of its own.
 - **`cairn-gateway`**: the only holder of a spend credential. It has no published port and is reachable only from `cairn`.
 
-Your reverse proxy (Caddy or nginx) terminates TLS and forwards to `127.0.0.1:8787`. AI goes through Cloudflare AI Gateway with the OpenRouter key stored there (BYOK); that part doesn't care where Cairn runs.
+```
+ Internet ─▶ door (EoC, Caddy) ─ eoc-cairn-door ─▶ cairn ─ eoc-cairn-index ─▶ index (EoC's SurrealDB)
+                    │                                │
+                 inside ─▶ sign-in ─▶ book         gateway (internal) ─▶ cairn-gateway ─▶ AI Gateway
+```
+
+`cairn` is never on EoC's `inside` network, so it can't reach EoC's book, which has no sign-in of its own. EoC's side of this is written up in its `docs/SETUP.md` ("Sharing the server with Cairn") and `docs/DECISIONS.md` ("Cairn shares the rented server").
+
+AI goes through Cloudflare AI Gateway with the OpenRouter key stored there (BYOK); that part doesn't care where Cairn runs.
+
+Running Cairn **standalone** (its own SurrealDB, its own proxy) is `compose.yaml` alone: `make vps-up COMPOSE="docker compose"`, `SURREAL_URL` in `deploy/cairn.env`, and a reverse proxy to `127.0.0.1:8787` (`deploy/Caddyfile.example`).
 
 ## VPS: one-time setup
 
-1. **SurrealDB (EoC's instance).**
-   - Edit `deploy/surreal-init.surql`, replacing `CHANGE_ME` with a long random password. Then run it as root:
-     ```sh
-     surreal sql --endpoint http://127.0.0.1:8000 --user root --pass '…' < deploy/surreal-init.surql
-     ```
-     This creates namespace `cairn`, database `main`, and a **database-level** user `cairn` (role EDITOR). Cairn never touches EoC's namespaces, and this user can't log in to them.
-   - Make sure the `cairn` container can reach SurrealDB:
-     - **Surreal runs on the host** (systemd or a binary): it must listen on an address the Docker bridge can reach, such as `0.0.0.0:8000` behind a firewall, or the `docker0` address. Then `SURREAL_URL=http://host.docker.internal:8000`. A Surreal bound only to `127.0.0.1` is unreachable from containers.
-     - **Surreal runs in EoC's compose project:** use `compose.eoc-network.yaml` (set EoC's network name in it) and `SURREAL_URL=http://<surreal service name>:8000`. Only `cairn` joins that network, never the gateway.
-   - Optional, recommended: run the Store contract test against that server from a machine with Rust. It creates and then removes a throwaway database, so it needs root or a namespace-level user:
-     ```sh
-     CAIRN_SURREAL_URL=http://<host>:8000 CAIRN_SURREAL_USER=root CAIRN_SURREAL_PASS=… CAIRN_SURREAL_NS=cairn_test make test-live
-     ```
-2. **OpenRouter.**
+1. **EoC first.** EoC's compose project must be up, with its changes for Cairn (the `eoc-cairn-index` and `eoc-cairn-door` networks, and the door's `sites/` import). Its `docker compose up -d` creates the two networks.
+2. **Cairn's namespace and user in EoC's SurrealDB.** From EoC's folder on the server (`~/engine-of-creation`, its copied `deploy` folder; Cairn's clone sits beside it at `~/cairn`), make up Cairn's password and run the init script with EoC's root password (read from EoC's `.env`):
+   ```sh
+   CAIRN_PASS="$(openssl rand -hex 24)"; echo "SURREAL_PASS for deploy/cairn.env: $CAIRN_PASS"
+   sed "s/CHANGE_ME/$CAIRN_PASS/" ../cairn/deploy/surreal-init.surql | \
+     docker run --rm -i --network eoc-cairn-index surrealdb/surrealdb:v4.0.1 sql \
+     --endpoint http://index:8000 --user root --pass "$(sed -n 's/^INDEX_PASSWORD=//p' .env)" --hide-welcome
+   ```
+   - It runs in a **throwaway container** on `eoc-cairn-index`, not inside `index`, because `surreal sql` saves everything it's given to a `history.txt` in its working directory, Cairn's password included. The throwaway container takes that file with it. The password is substituted on the way in, so it's never written into the checkout.
+   - It creates namespace `cairn`, database `main`, and a **database-level** user `cairn` (role EDITOR). Cairn never touches EoC's `eoc` namespace, and this user can't log in to it (tried). EoC's rebuild only rewrites rows in `eoc` and never removes a namespace.
+   - Use the same image tag as EoC's `index`.
+3. **OpenRouter.**
    - Create a **dedicated** regular API key for Cairn, with a **credit limit and reset**. Turn auto top-up off.
    - Never create a management key for this.
-3. **Cloudflare AI Gateway** (holds the OpenRouter key, BYOK). The Workers plan doesn't matter for this.
+4. **Cloudflare AI Gateway** (holds the OpenRouter key, BYOK). The Workers plan doesn't matter for this.
    - Create a gateway named `cairn`, turn on **Authenticated Gateway**, and create an auth token. That token is `CF_AIG_TOKEN`.
    - Under **Provider Keys**, add the OpenRouter key from step 2 with the alias `cairn`.
    - Under **Settings → Spend limits**, add a daily rule at about 1.2× `global.per_day_usd`, and leave fallback routing **off**.
    - Turn on **Require provider credentials**. The gateway also sends `cf-aig-no-wholesale: true`, so a missing stored key fails instead of billing Cloudflare credits.
-4. **Env files** (both gitignored):
+5. **Env files** (both gitignored):
    ```sh
    cp deploy/cairn.env.example deploy/cairn.env
    cp deploy/gateway.env.example deploy/gateway.env
    ```
-   - `deploy/cairn.env` gets `SURREAL_URL`, `SURREAL_PASS` (from step 1) and `CAIRN_TOKENS` (hash each token with `make hash`).
+   - `deploy/cairn.env` gets `SURREAL_PASS` (from step 2) and `CAIRN_TOKENS` (hash each token with `make hash`). `compose.eoc.yaml` sets `SURREAL_URL=http://index:8000`.
    - `deploy/gateway.env` gets `CF_AIG_TOKEN`, plus your account ID in `AIG_BASE_URL`.
    - Each container refuses to start if it can see the other one's secrets.
    - Run `chmod 600 deploy/*.env`.
-5. **Start, then migrate:**
+6. **Start, then migrate** (from Cairn's folder):
    ```sh
-   make vps-up        # docker compose up -d --build
-   make vps-migrate   # docker compose run --rm cairn migrate (idempotent)
+   make vps-up        # docker compose -f compose.yaml -f compose.eoc.yaml up -d --build
+   make vps-migrate   # `cairn migrate` in a one-off container (idempotent)
    ```
-6. **Reverse proxy.** Point a hostname at `127.0.0.1:8787`.
-   - **Caddy:** see `deploy/Caddyfile.example`. TLS and WebSockets need no extra setup.
-   - **nginx:** pass the WebSocket upgrade for `/hub`:
-     ```nginx
-     location / {
-         proxy_pass http://127.0.0.1:8787;
-         proxy_http_version 1.1;
-         proxy_set_header Upgrade $http_upgrade;
-         proxy_set_header Connection "upgrade";
-         proxy_set_header Host $host;
-         proxy_read_timeout 1h;
-     }
-     ```
-   - Nothing sits in front of Cairn's own auth now: every route needs a scoped token, a webhook token or a Discord signature. Use long random tokens.
-7. **Discord** (optional): set the interactions endpoint to `https://<host>/integrations/discord/interactions`, enable `[discord]` in config, and add `DISCORD_*` to `deploy/cairn.env`.
+7. **A name, through EoC's door.** Point a DNS name at the server, like the book's. In EoC's folder:
+   - set `CAIRN_ADDRESS` in `.env`;
+   - copy `sites/cairn.caddy.example` to `sites/cairn.caddy`;
+   - recreate the door with `docker compose up -d --force-recreate door`.
+
+   Caddy gets the certificate and passes WebSockets (`/hub`) through without extra setup.
+   - **Cairn is not behind EoC's GitHub sign-in.** Phones, scripts and Discord post with Cairn's own tokens, which a sign-in page would block. Every route needs a scoped token, a webhook token or a Discord signature, so use long random tokens. Putting the web pages behind the sign-in, with the machine paths let through, is an open question in EoC's DECISIONS.md.
+8. **Discord** (optional): set the interactions endpoint to `https://<host>/integrations/discord/interactions`, enable `[discord]` in config, and add `DISCORD_*` to `deploy/cairn.env`.
 
 ## VPS: every deploy
 
@@ -71,29 +72,29 @@ make vps-migrate     # apply new schema/*.surql
 ## VPS: raising a cap or re-enabling AI
 
 Both need operator access to the host, on purpose:
-- **To raise a cap:** edit `config/gateway.toml`, then rebuild the gateway: `docker compose up -d --build cairn-gateway`. Caps are compiled into the binary.
-- **To re-enable after a disable:** set `ENABLE_AFTER` in `deploy/gateway.env` to the current time (RFC 3339), then `docker compose up -d --force-recreate cairn-gateway`.
+In the commands below, `$COMPOSE` means `docker compose -f compose.yaml -f compose.eoc.yaml`, which is the Makefile's default.
+
+- **To raise a cap:** edit `config/gateway.toml`, then rebuild the gateway: `$COMPOSE up -d --build cairn-gateway`. Caps are compiled into the binary.
+- **To re-enable after a disable:** set `ENABLE_AFTER` in `deploy/gateway.env` to the current time (RFC 3339), then `$COMPOSE up -d --force-recreate cairn-gateway`.
 
 ## VPS: operations
 
-- **Logs:** `docker compose logs -f cairn` or `docker compose logs -f cairn-gateway`. Set `RUST_LOG=debug` in the env file for more.
+- **Logs:** `make vps-logs`, or `$COMPOSE logs -f cairn`. Set `RUST_LOG=debug` in the env file for more.
 - **Spool:**
-  - `docker compose exec cairn cairn spool status` shows `{pending, dead}`.
+  - `$COMPOSE exec cairn cairn spool status` shows `{pending, dead}`.
   - `pending` should be near zero. It grows while SurrealDB is down and drains on its own when it's back.
-  - `dead` rows ran out of retries (10 for captures, 3 for task firings) and are kept. Fix the cause, then run `docker compose exec cairn cairn spool retry-dead`.
+  - `dead` rows ran out of retries (10 for captures, 3 for task firings) and are kept. Fix the cause, then run `$COMPOSE exec cairn cairn spool retry-dead`.
 - **Backups:**
-  - SurrealDB, Cairn's namespace only:
-    ```sh
-    surreal export --endpoint http://127.0.0.1:8000 --user root --pass … --ns cairn --db main cairn-$(date +%F).surql
-    ```
+  - **Cairn's namespace** is the one thing here that can't be rebuilt. EoC's index is disposable by design (EoC refills its own part from the book), but Cairn's part isn't, so back it up. Use `make vps-backup`, set `EOC=<EoC's folder>` if it isn't `../engine-of-creation`. It runs `surreal export` inside EoC's `index` container as Cairn's own user, so no root password is involved, and writes `backups/cairn-<date>.surql` (gitignored). Schedule it with cron, and copy the files off the server.
+  - Restoring into an empty namespace: run `surreal-init.surql` again, then `surreal import` the file as the `cairn` user.
   - Also the two volumes: `cairn_cairn-spool` (normally near-empty) and `cairn_cairn-ledger` (spend history).
-- **SurrealDB upgrades** (shared with EoC): re-run `make test-live` against the upgraded server before relying on it.
+- **SurrealDB upgrades** (shared with EoC, which pins `index` to its `surrealdb` crate). Before EoC raises the version, run Cairn's contract against the new one locally: `make db SURREAL_VERSION=v4.x.y && make db-init && make test-live`. EoC's index publishes no port, so the test can't run against it directly.
 - **Config without a rebuild:** mount a file and set `CAIRN_CONFIG` (see `deploy/cairn.env.example`). Otherwise `config/cairn.toml` is embedded at build time.
 
 ## Local development (native, no containers)
 
 ```sh
-make db                       # local SurrealDB at :8000 (root/root, in memory)
+make db                       # local SurrealDB at :8000 (root/root, in memory; SURREAL_VERSION as EoC's)
 make db-init                  # create ns `cairn` / db `main`: SurrealDB 3+/4 won't create them on first use
 make test-live                # optional: the Store contract against that server
 make web-build                # web/dist, served by cairn

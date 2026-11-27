@@ -1,8 +1,11 @@
--- One-time setup on the shared SurrealDB (ADR 0014). Run as root on the VPS, e.g.
---   surreal sql --endpoint http://127.0.0.1:8000 --user root --pass … < deploy/surreal-init.surql
--- Cairn gets its own namespace and a database-level user, so it can't see EoC's data
--- (and EoC's users can't see Cairn's unless they are root).
--- Replace CHANGE_ME with a long random password, then put the same value in deploy/cairn.env.
+-- One-time setup of Cairn's namespace in EoC's SurrealDB (ADR 0014; docs/deploy.md, step 2).
+-- Don't edit the password in here: it is substituted on the way in, through a throwaway
+-- container, because `surreal sql` writes everything it is given to a history.txt:
+--   sed "s/CHANGE_ME/$CAIRN_PASS/" deploy/surreal-init.surql | docker run --rm -i \
+--     --network eoc-cairn-index surrealdb/surrealdb:v4.0.1 sql --endpoint http://index:8000 \
+--     --user root --pass … --hide-welcome
+-- Cairn gets its own namespace and a database-level user, so it can't see EoC's `eoc`
+-- namespace (and EoC's users can't see Cairn's unless they are root).
 DEFINE NAMESPACE IF NOT EXISTS cairn;
 USE NS cairn;
 DEFINE DATABASE IF NOT EXISTS main;

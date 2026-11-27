@@ -4,7 +4,7 @@
 timezone = "America/Los_Angeles"   # cron triggers, quiet hours and digest times use this zone
 
 [surreal]
-url = "http://host.docker.internal:8000"   # EoC's SurrealDB on the VPS; SURREAL_URL overrides
+url = "http://index:8000"   # EoC's `index` container (compose.eoc.yaml); SURREAL_URL overrides
 namespace = "cairn"
 database = "main"
 # credentials: SURREAL_USER / SURREAL_PASS in deploy/cairn.env (database-level user, not root)

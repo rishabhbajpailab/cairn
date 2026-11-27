@@ -1,4 +1,4 @@
-.PHONY: vps-up vps-migrate vps-logs run-server run-gateway
+.PHONY: vps-up vps-migrate vps-logs vps-backup run-server run-gateway
 .PHONY: check fmt fmt-check lint test test-live build-workers check-wasm coldstart db-init web web-build types db dev-api dev-gateway deploy deploy-gateway deploy-api migrate hash
 
 API ?= https://cairn.example.dev
@@ -18,6 +18,9 @@ test:                                  ## native: no Cloudflare or database need
 	cargo test --workspace
 
 SURREAL ?= http://127.0.0.1:8000
+# Keep equal to the `index` image in engine-of-creation/deploy/compose.yaml. To check a newer
+# version before EoC raises it: make db SURREAL_VERSION=v4.x.y && make db-init && make test-live
+SURREAL_VERSION ?= v4.0.1
 test-live:                             ## SurrealHttpStore against a real SurrealDB (default: local `make db`)
 	CAIRN_SURREAL_URL=$(SURREAL) cargo test -p cairn-store --test live_surreal -- --nocapture
 
@@ -44,21 +47,36 @@ web-build:
 
 db:                                    ## local SurrealDB for `wrangler dev` (root/root, in-memory)
 	podman run --rm -d --name cairn-surreal -p 127.0.0.1:8000:8000 \
-	  docker.io/surrealdb/surrealdb:v4.0.1 start --user root --pass root memory
+	  docker.io/surrealdb/surrealdb:$(SURREAL_VERSION) start --user root --pass root memory
 
 db-init:                               ## create namespace `cairn` / database `main` (SurrealDB doesn't do it implicitly)
 	curl -fsS -X POST "$(SURREAL)/sql" -u root:root -H 'accept: application/json' \
 	  -d 'DEFINE NAMESPACE IF NOT EXISTS cairn; USE NS cairn; DEFINE DATABASE IF NOT EXISTS main;' >/dev/null && echo ok
 
 # ── VPS (ADR 0014, docs/deploy.md) ────────────────────────────────────────────
+# Standard VPS deployment: sharing EoC's SurrealDB and door (compose.eoc.yaml).
+# Standalone: make vps-up COMPOSE="docker compose"
+COMPOSE ?= docker compose -f compose.yaml -f compose.eoc.yaml
+# EoC's folder on the server (its copied deploy/ folder, beside this clone), for vps-backup.
+EOC ?= ../engine-of-creation
+
 vps-up:                                ## build + (re)start both containers
-	docker compose up -d --build
+	$(COMPOSE) up -d --build
 
 vps-migrate:                           ## apply schema/*.surql (idempotent)
-	docker compose run --rm cairn migrate
+	$(COMPOSE) run --rm cairn migrate
 
 vps-logs:
-	docker compose logs -f --tail=100
+	$(COMPOSE) logs -f --tail=100
+
+vps-backup:                            ## export Cairn's namespace from EoC's index, as Cairn's own user
+	@mkdir -p backups
+	@SURREAL_USER="$$(sed -n 's/^SURREAL_USER=//p' deploy/cairn.env)"; \
+	  SURREAL_PASS="$$(sed -n 's/^SURREAL_PASS=//p' deploy/cairn.env)"; \
+	  docker compose --project-directory "$(EOC)" exec -T index /surreal export \
+	  --endpoint http://localhost:8000 --user "$$SURREAL_USER" --pass "$$SURREAL_PASS" --auth-level database \
+	  --namespace cairn --database main - > backups/cairn-$$(date +%F-%H%M).surql
+	@ls -l backups | tail -1
 
 # Native, no containers, against `make db` (root/root). CAIRN_TOKENS comes from your shell,
 # e.g. CAIRN_TOKENS="me:admin:$$(printf %s devtoken | sha256sum | cut -d' ' -f1)".
