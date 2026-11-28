@@ -1,4 +1,4 @@
-.PHONY: vps-up vps-migrate vps-logs vps-backup vps-backup-upload run-server run-gateway
+.PHONY: vps-up vps-build vps-migrate vps-logs vps-backup vps-backup-upload run-server run-gateway
 .PHONY: check fmt fmt-check lint test test-live build-workers check-wasm coldstart db-init web web-build types db dev-api dev-gateway deploy deploy-gateway deploy-api migrate hash
 
 API ?= https://cairn.example.dev
@@ -60,7 +60,11 @@ COMPOSE ?= docker compose -f compose.yaml -f compose.eoc.yaml
 # EoC's folder on the server (its copied deploy/ folder, beside this clone), for vps-backup.
 EOC ?= ../engine-of-creation
 
-vps-up:                                ## build + (re)start both containers
+vps-up:                                ## pull the CI-built images (CAIRN_VERSION, default latest) + (re)start
+	$(COMPOSE) pull
+	$(COMPOSE) up -d
+
+vps-build:                             ## build the images on this host instead of pulling, + (re)start
 	$(COMPOSE) up -d --build
 
 vps-migrate:                           ## apply schema/*.surql (idempotent)
