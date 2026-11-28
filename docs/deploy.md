@@ -60,7 +60,7 @@ Running Cairn **standalone** (its own SurrealDB, its own proxy) is `compose.yaml
    - Each container refuses to start if it can see the other one's secrets.
 7. **Start, then migrate** (from Cairn's folder):
    ```sh
-   make vps-up        # docker compose -f compose.yaml -f compose.eoc.yaml up -d --build
+   make vps-up        # pulls the images from GHCR, then docker compose -f compose.yaml -f compose.eoc.yaml up -d
    make vps-migrate   # `cairn migrate` in a one-off container (idempotent)
    ```
 8. **A name, through EoC's door.** Point a DNS name at the server, like the book's. In EoC's folder:
@@ -75,18 +75,30 @@ Running Cairn **standalone** (its own SurrealDB, its own proxy) is `compose.yaml
 
 ## VPS: every deploy
 
+The server doesn't build anything: CI builds both images and pushes them to GHCR when a version tag is pushed. To release, bump `version` in the root `Cargo.toml` (`[workspace.package]`), commit, and push a matching tag:
+
 ```sh
-git pull
-make vps-up          # rebuilds and recreates changed containers; the spool and ledger volumes persist
+git tag -a v0.2.0 -m v0.2.0 && git push origin v0.2.0
+```
+
+CI's `release` job runs after every other check passes, refuses a tag that doesn't match `Cargo.toml`, and pushes `ghcr.io/rishabhbajpailab/cairn` and `ghcr.io/rishabhbajpailab/cairn-gateway` as `0.2.0` and `latest` (a pre-release tag like `v0.2.0-rc.1` doesn't move `latest`). Then on the VPS:
+
+```sh
+git pull             # compose files, deploy/, schema/ (not the code: that's in the image)
+make vps-up          # pulls `latest` and recreates changed containers; the spool and ledger volumes persist
 make vps-migrate     # apply new schema/*.surql
 ```
+
+- **Pin or roll back:** `make vps-up CAIRN_VERSION=0.1.0` (or put `CAIRN_VERSION=0.1.0` in `.env` beside `compose.yaml`).
+- **GHCR sign-in:** while the packages are private, run `docker login ghcr.io -u <github user>` once on the VPS with a classic token that has only `read:packages`. Or make both packages public in their GitHub package settings: the images contain no secrets.
+- **Build on the host instead:** `make vps-build` (the old behaviour; slow on a small server).
 
 ## VPS: raising a cap or re-enabling AI
 
 Both need operator access to the host, on purpose:
 In the commands below, `$COMPOSE` means `docker compose -f compose.yaml -f compose.eoc.yaml`, which is the Makefile's default.
 
-- **To raise a cap:** edit `config/gateway.toml`, then rebuild the gateway: `$COMPOSE up -d --build cairn-gateway`. Caps are compiled into the binary.
+- **To raise a cap:** edit `config/gateway.toml`, release a new version (above), then `make vps-up`. Caps are compiled into the binary. (Or `$COMPOSE up -d --build cairn-gateway` to build it on the host.)
 - **To re-enable after a disable:** set `ENABLE_AFTER` in `deploy/gateway.env` to the current time (RFC 3339), then `$COMPOSE up -d --force-recreate cairn-gateway`.
 
 ## VPS: operations

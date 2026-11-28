@@ -33,7 +33,7 @@ make check          # fmt check + clippy -D warnings + tests (run before every c
 make test           # cargo test --workspace (native; no Cloudflare or DB needed)
 make test-live      # SurrealHttpStore against a real SurrealDB (default: local `make db`)
 make db | make db-init | make run-gateway | make run-server | make web   # native local dev, see docs/deploy.md
-make vps-up | make vps-migrate | make vps-logs                          # on the VPS (compose.yaml + compose.eoc.yaml)
+make vps-up | make vps-migrate | make vps-logs                          # on the VPS: pulls GHCR images CI pushes on a vX.Y.Z tag (vps-build builds locally)
 make vps-backup | make vps-backup-upload                                # deploy/backup.sh: local copy | + upload (weekly cron)
 make build-workers  # legacy: worker-build --release for both Workers (needs the wasm32 target)
 make coldstart      # CPU cost of a cold plugin-registry load, as wasm under Node

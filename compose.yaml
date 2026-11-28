@@ -8,7 +8,7 @@
 #   cp deploy/cairn.env.example deploy/cairn.env        # fill in
 #   cp deploy/gateway.env.example deploy/gateway.env    # fill in
 #   cp deploy/sign-in.env.example deploy/sign-in.env    # fill in; secrets in deploy/secrets/
-#   make vps-up && make vps-migrate
+#   make vps-up && make vps-migrate      # pulls the CI-built images; CAIRN_VERSION=0.1.0 pins one
 name: cairn
 
 services:
@@ -30,8 +30,9 @@ services:
     mem_limit: 128m
 
   cairn:
+    # Built by CI on a version tag (docs/deploy.md). `make vps-build` builds it locally instead.
+    image: ghcr.io/rishabhbajpailab/cairn:${CAIRN_VERSION:-latest}
     build: { context: ., target: cairn }
-    image: cairn:latest
     restart: unless-stopped
     env_file: deploy/cairn.env
     environment:
@@ -49,8 +50,8 @@ services:
     mem_limit: 256m
 
   cairn-gateway:
+    image: ghcr.io/rishabhbajpailab/cairn-gateway:${CAIRN_VERSION:-latest}
     build: { context: ., target: gateway }
-    image: cairn-gateway:latest
     restart: unless-stopped
     env_file: deploy/gateway.env     # CF_AIG_TOKEN, AIG_BASE_URL, AIG_BYOK_ALIAS, ENABLE_AFTER
     volumes:
