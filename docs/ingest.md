@@ -26,7 +26,7 @@ Run `make hash` to get the hash. **M1:** tokens move to the `api_token` table, m
 |---|---|---|
 | `capture` | `POST /api/v1/capture` only | iOS Shortcut, scripts, cron jobs |
 | `read` | GET endpoints | dashboards, newsletter pipelines |
-| `write` | everything except admin | the web UI (behind Cloudflare Access) |
+| `write` | everything except admin (includes `read` and `capture`) | the web UI (behind the GitHub sign-in) |
 | `admin` | `POST /api/v1/admin/migrate`, token management, GC purge-now | you, from `make` targets |
 
 ## REST capture

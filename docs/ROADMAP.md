@@ -28,6 +28,7 @@ Each milestone should be usable on its own before the next one starts. Tick item
   - Ordering filters no longer match missing fields: SurrealQL sorts NONE first, and `MemStore` didn't match them.
   - Namespace and database must exist up front: `make db-init` locally.
 - [ ] Browser click-through of the web UI served by `cairn` (inbox, canvas, live refresh).
+- [x] **First-run guidance in the web UI.** A welcome page that checks the token and explains how to make one, an inbox and canvas that say what to do when empty, capture hints, and a seeded "Getting started" checklist (`POST /api/v1/onboarding`, `cairn_app::onboarding`): a bucket of setup to-dos (capture token, iOS Shortcut, timezone, Discord, spend limits, backup, canvas). Seeded once on a brand-new Cairn and never again once archived or trashed. Clicked through with Playwright against `cairn` and SurrealDB 4.0.1. Fixed on the way: a `write` token couldn't capture, although docs/ingest.md said it could, so the inbox's capture box never worked with the `ui:write` token.
 - [ ] **Check AI Gateway BYOK with OpenRouter.** Cloudflare docs (checked 2026-11-26) confirm the design. The live checks still need a deploy:
   - [x] Stored keys are injected on provider passthrough (`/openrouter/...`) only when no provider `Authorization` header is sent. The gateway sends none, and a test asserts that.
   - [x] `cf-aig-byok-alias` selects a non-default stored key on passthrough requests (the alias is ignored only on Unified Billing endpoints, which Cairn doesn't use).

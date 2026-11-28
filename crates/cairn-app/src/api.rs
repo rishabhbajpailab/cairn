@@ -38,6 +38,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/edges", post(create_edge))
         .route("/api/v1/types", get(list_types))
         .route("/api/v1/tasks/{id}/dry-run", post(dry_run))
+        .route("/api/v1/onboarding", post(seed_onboarding))
         .route("/integrations/discord/interactions", post(crate::discord::interactions))
 }
 
@@ -166,6 +167,18 @@ async fn list_types(State(st): State<AppState>, headers: HeaderMap) -> Result<Js
         })
         .collect();
     Ok(Json(json!({ "types": types })))
+}
+
+/// Seed the "Getting started" checklist (`crate::onboarding`). 201 when written, 200 when
+/// one already exists.
+async fn seed_onboarding(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    st.tokens.check(&headers, Scope::Write)?;
+    let r = crate::onboarding::seed(&st).await?;
+    let status = if r.created { StatusCode::CREATED } else { StatusCode::OK };
+    Ok((status, Json(json!(r))))
 }
 
 async fn dry_run(

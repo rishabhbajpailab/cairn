@@ -56,6 +56,8 @@ Core edge kinds:
 
 Buckets come in two kinds. A **manual bucket** is an item of type `bucket` with `contains` edges to its members. A **smart bucket** is a `bucket` item whose payload holds a `query`, so its members are computed and it has no `contains` edges.
 
+The built-in **Getting started** checklist is a manual bucket tagged `onboarding` whose members are setup `todo`s, also tagged `onboarding`. `POST /api/v1/onboarding` (write scope) creates it unless an item with that tag exists in any lifecycle; the steps live in `crates/cairn-app/src/onboarding.rs`. The web UI calls it on a brand-new Cairn.
+
 ## Op (ops log)
 
 Ops are append-only. A SurrealDB event (`op_append_only` in `schema/0001_init.surql`) throws on any `DELETE`, and on any `UPDATE` other than GC redaction, which clears `before` and `after` and changes nothing else.

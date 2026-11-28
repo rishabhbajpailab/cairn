@@ -62,7 +62,8 @@ impl TokenSet {
         Self(entries)
     }
 
-    /// Returns the token name if the bearer token is valid and has `scope` (admin implies all).
+    /// Returns the token name if the bearer token is valid and has `scope`. Admin implies all;
+    /// write implies read and capture ("everything except admin", docs/ingest.md).
     pub fn check(&self, headers: &HeaderMap, scope: Scope) -> Result<String, ApiError> {
         let raw = headers
             .get(axum::http::header::AUTHORIZATION)
@@ -73,7 +74,7 @@ impl TokenSet {
         let entry = self.0.iter().find(|e| e.sha256 == digest).ok_or_else(ApiError::unauthorized)?;
         let ok = entry.scopes.contains(&scope)
             || entry.scopes.contains(&Scope::Admin)
-            || (scope == Scope::Read && entry.scopes.contains(&Scope::Write));
+            || (matches!(scope, Scope::Read | Scope::Capture) && entry.scopes.contains(&Scope::Write));
         if ok { Ok(entry.name.clone()) } else { Err(ApiError::forbidden(scope.as_str())) }
     }
 }
@@ -98,5 +99,14 @@ mod tests {
         assert_eq!(set.check(&headers("s3cret"), Scope::Capture).unwrap(), "phone");
         assert!(set.check(&headers("s3cret"), Scope::Read).is_err());
         assert!(set.check(&headers("wrong"), Scope::Capture).is_err());
+    }
+
+    #[test]
+    fn write_token_can_read_and_capture_but_not_admin() {
+        let set = TokenSet::from_env_str(&format!("ui:write:{}", sha256_hex("w")));
+        for s in [Scope::Read, Scope::Capture, Scope::Write] {
+            assert!(set.check(&headers("w"), s).is_ok(), "{s:?}");
+        }
+        assert!(set.check(&headers("w"), Scope::Admin).is_err());
     }
 }

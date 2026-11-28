@@ -17,6 +17,7 @@ pub mod discord;
 pub mod error;
 pub mod ingest;
 pub mod items;
+pub mod onboarding;
 pub mod ports;
 pub mod reminders;
 pub mod schedule;

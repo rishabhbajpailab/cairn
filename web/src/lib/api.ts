@@ -1,6 +1,6 @@
 import type { Edge, Item, Query, TypeInfo } from './types';
 
-// The web UI sits behind Caddy + Authelia; the API still wants a write-scoped token.
+// The web UI sits behind the GitHub sign-in (ADR 0015); the API still wants a write-scoped token.
 // Browser storage is a per-browser convenience only, so guard every access.
 const TOKEN_KEY = 'cairn.token';
 
@@ -19,6 +19,26 @@ export function setToken(t: string) {
     /* storage unavailable: token lives for this page only */
   }
   memoryToken = t;
+}
+
+export function clearToken() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* nothing stored */
+  }
+  memoryToken = null;
+}
+
+/** Per-browser flags (e.g. "checklist already offered"). Never relied on for correctness. */
+export function flag(name: string, set?: boolean): boolean {
+  const key = `cairn.${name}`;
+  try {
+    if (set !== undefined) localStorage.setItem(key, set ? '1' : '');
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return !!set;
+  }
 }
 
 let memoryToken: string | null = null;
@@ -46,7 +66,7 @@ async function call<T>(method: string, path: string, body?: unknown, contentType
 }
 
 export const api = {
-  capture: (text: string) => call<{ capture_id: string; item_id: string | null }>('POST', '/api/v1/capture', text, 'text/plain'),
+  capture: (text: string) => call<{ capture_id: string; item_id: string | null; type: string | null }>('POST', '/api/v1/capture', text, 'text/plain'),
   query: (q: Query) => call<Item[]>('POST', '/api/v1/query', q),
   item: (id: string) => call<Item>('GET', `/api/v1/items/${id}`),
   patch: (id: string, payload: Record<string, unknown>) => call<Item>('PATCH', `/api/v1/items/${id}`, { payload }),
@@ -54,4 +74,6 @@ export const api = {
   edges: (id: string) => call<Edge[]>('GET', `/api/v1/items/${id}/edges`),
   link: (from: string, to: string, kind: string) => call<Edge>('POST', '/api/v1/edges', { from, to, kind }),
   types: () => call<{ types: TypeInfo[] }>('GET', '/api/v1/types'),
+  /** Seed the "Getting started" checklist; a no-op if one was ever seeded. */
+  onboard: () => call<{ created: boolean; bucket: string | null; steps: number }>('POST', '/api/v1/onboarding'),
 };
