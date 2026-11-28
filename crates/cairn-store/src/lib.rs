@@ -9,10 +9,11 @@
 //! written with [`Store::put_capture`] so ingest can never be blocked by op validation.
 
 mod mem;
+mod surreal_cbor;
 mod surreal_http;
 
 pub use mem::MemStore;
-pub use surreal_http::{SchemaFile, SurrealConfig, SurrealHttpStore};
+pub use surreal_http::{AuthLevel, SchemaFile, SurrealConfig, SurrealHttpStore};
 
 use async_trait::async_trait;
 use cairn_domain::{Capture, Edge, Id, Item, Op, Query, View};

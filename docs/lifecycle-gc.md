@@ -24,7 +24,7 @@
 5. **GC is a task** (`builtin/gc`). It has a dry run, its reports are `task-run` items, and it uses no LLM. It runs from the TASKS queue like any other task.
 6. **Never GC'd:** the gateway ledger, `task` items, `bucket` items, and anything created in the UI that has no policy covering its type.
 
-## Default policies (`config/cairn.toml` → `[gc]`, deployed with the API Worker)
+## Default policies (`config/cairn.toml` → `[gc]`, embedded in `cairn`)
 
 ```toml
 [gc]

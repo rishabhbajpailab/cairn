@@ -1,18 +1,18 @@
-# Cairn API Worker configuration. Committed and embedded at build time: changing it means a
-# deploy. Secrets are Worker secrets (`wrangler secret put …`), never in this file.
+# Cairn configuration. Committed and embedded at build time (or set CAIRN_CONFIG to a file on
+# the VPS). Secrets go in deploy/cairn.env (gitignored), never in this file.
 
 timezone = "America/Los_Angeles"   # cron triggers, quiet hours and digest times use this zone
 
 [surreal]
-url = "https://REPLACE-instance.surreal.cloud"   # Surreal Cloud HTTPS endpoint
+url = "http://index:8000"   # EoC's `index` container (compose.eoc.yaml); SURREAL_URL overrides
 namespace = "cairn"
 database = "main"
-# credentials: SURREAL_USER / SURREAL_PASS Worker secrets (database-level user, not root)
+# credentials: SURREAL_USER / SURREAL_PASS in deploy/cairn.env (database-level user, not root)
 
 [discord]
 enabled = false
 dm_user_id = ""                    # your Discord user id; reminders and digests DM you
-# DISCORD_PUBLIC_KEY / DISCORD_BOT_TOKEN are Worker secrets
+# DISCORD_PUBLIC_KEY / DISCORD_BOT_TOKEN go in deploy/cairn.env
 
 [notify]
 max_reminders_per_day = 8          # hard cap on AI-proposed reminders applied per day

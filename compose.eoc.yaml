@@ -1,0 +1,29 @@
+# Cairn sharing the rented server with Engine of Creation (EoC), the standard
+# deployment (docs/deploy.md). Start EoC first: its compose file makes the two
+# networks below.
+#
+#   docker compose -f compose.yaml -f compose.eoc.yaml up -d --build
+#   (or `make vps-up`, which does exactly that)
+#
+# - eoc-cairn-index: cairn ↔ EoC's `index` (SurrealDB 4.0.1). SURREAL_URL below.
+# - eoc-cairn-door:  EoC's `door` (Caddy, ports 80/443) ↔ cairn-sign-in. EoC's
+#   deploy/sites/cairn.caddy proxies CAIRN_ADDRESS to cairn-sign-in:4180.
+# The door can reach only Cairn's sign-in, never cairn itself. The gateway joins no EoC
+# network, and nothing of Cairn's joins EoC's `inside`, where EoC's book is.
+services:
+  cairn-sign-in:
+    ports: !reset []                 # the door reaches it over eoc-cairn-door
+    networks: [default, eoc-door]
+
+  cairn:
+    environment:
+      SURREAL_URL: http://index:8000
+    networks: [default, gateway, eoc-index]
+
+networks:
+  eoc-index:
+    external: true
+    name: eoc-cairn-index
+  eoc-door:
+    external: true
+    name: eoc-cairn-door

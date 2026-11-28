@@ -1,0 +1,29 @@
+[package]
+name = "cairn-gateway-server"
+description = "cairn-gateway on the VPS (ADR 0014): the only process with a spend credential. Ledger in SQLite."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "cairn-gateway"
+path = "src/main.rs"
+
+[dependencies]
+cairn-gateway-core = { workspace = true, features = ["sqlite"] }
+cairn-http = { workspace = true, features = ["reqwest"] }
+axum = { workspace = true, features = ["tokio", "http1"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+http-body-util.workspace = true
+
+[lints]
+workspace = true

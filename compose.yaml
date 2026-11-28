@@ -1,0 +1,77 @@
+# Cairn on the VPS (ADR 0014, docs/deploy.md). Three containers:
+#
+#   (door or host proxy) -> cairn-sign-in (GitHub, Cairn's own OAuth App) -> cairn -> cairn-gateway
+#
+# This file alone runs Cairn standalone, with only the sign-in published, on 127.0.0.1:8787.
+# The standard deployment shares Engine of Creation's SurrealDB and door: add
+# compose.eoc.yaml (`make vps-up` does).
+#   cp deploy/cairn.env.example deploy/cairn.env        # fill in
+#   cp deploy/gateway.env.example deploy/gateway.env    # fill in
+#   cp deploy/sign-in.env.example deploy/sign-in.env    # fill in; secrets in deploy/secrets/
+#   make vps-up && make vps-migrate
+name: cairn
+
+services:
+  # Everything from outside goes through here (ADR 0015). Pages and the app's API need the
+  # GitHub sign-in; the machine paths in deploy/sign-in.cfg are let through to Cairn's own
+  # token checks. cairn itself publishes no port and is on no network the door is on.
+  cairn-sign-in:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.6   # same as EoC's sign-in
+    restart: unless-stopped
+    command: ["--config=/etc/oauth2-proxy/sign-in.cfg"]
+    env_file: deploy/sign-in.env     # client ID, redirect URL, the one allowed GitHub account
+    volumes:
+      - ./deploy/sign-in.cfg:/etc/oauth2-proxy/sign-in.cfg:ro
+    secrets: [cairn_github_client_secret, cairn_cookie_secret]
+    ports:
+      - "127.0.0.1:8787:4180"        # standalone only; compose.eoc.yaml removes it
+    networks: [default]
+    depends_on: [cairn]
+    mem_limit: 128m
+
+  cairn:
+    build: { context: ., target: cairn }
+    image: cairn:latest
+    restart: unless-stopped
+    env_file: deploy/cairn.env
+    environment:
+      GATEWAY_URL: http://cairn-gateway:8788
+    volumes:
+      - cairn-spool:/data            # the capture spool: back it up with the gateway ledger
+    # No ports: only cairn-sign-in reaches it.
+    networks: [default, gateway]
+    # Standalone with SurrealDB on the host itself: SURREAL_URL=http://host.docker.internal:8000
+    # (Surreal must listen where the Docker bridge can reach it, not only 127.0.0.1).
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: [cairn-gateway]
+    # The server is shared with EoC (1 GB in its sizing). Measured: ~15 MB. The limit keeps a
+    # runaway from crowding out the book; raise it if Cairn ever needs more.
+    mem_limit: 256m
+
+  cairn-gateway:
+    build: { context: ., target: gateway }
+    image: cairn-gateway:latest
+    restart: unless-stopped
+    env_file: deploy/gateway.env     # CF_AIG_TOKEN, AIG_BASE_URL, AIG_BYOK_ALIAS, ENABLE_AFTER
+    volumes:
+      - cairn-ledger:/data
+    # No ports. `gateway` is shared only with cairn; `gateway-egress` is its own way out to
+    # Cloudflare AI Gateway. Nothing else on the host can reach it.
+    networks: [gateway, gateway-egress]
+    mem_limit: 128m                  # measured: ~6 MB
+
+secrets:
+  cairn_github_client_secret:
+    file: ./deploy/secrets/github_client_secret
+  cairn_cookie_secret:
+    file: ./deploy/secrets/cookie_secret
+
+networks:
+  default: {}
+  gateway:
+    internal: true
+  gateway-egress: {}
+
+volumes:
+  cairn-spool: {}
+  cairn-ledger: {}

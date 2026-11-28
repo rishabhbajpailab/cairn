@@ -38,6 +38,11 @@ fn plugins() -> Result<Arc<Registry>> {
             return Ok(v.clone());
         }
         let v = Arc::new(Registry::load_from(&Embedded).map_err(|e| Error::RustError(format!("plugins: {e}")))?);
+        let slow = v.runtime_compiled();
+        if !slow.is_empty() {
+            // Costs CPU on every cold isolate; see docs/deploy.md § CPU limits.
+            tracing::warn!(?slow, "plugin schemas compiled at runtime instead of build time");
+        }
         let _ = c.set(v.clone());
         Ok(v)
     })
@@ -64,6 +69,12 @@ pub fn surreal_store(env: &Env, cfg: &CoreConfig) -> Result<Arc<SurrealHttpStore
             database: s.database.clone(),
             username: secret(env, "SURREAL_USER").ok_or_else(|| Error::RustError("SURREAL_USER secret".into()))?,
             password: secret(env, "SURREAL_PASS").ok_or_else(|| Error::RustError("SURREAL_PASS secret".into()))?,
+            // `SURREAL_AUTH_LEVEL=root` for a local `make db`; production is a database user.
+            auth: env
+                .var("SURREAL_AUTH_LEVEL")
+                .ok()
+                .and_then(|v| cairn_store::AuthLevel::parse(&v.to_string()))
+                .unwrap_or_default(),
         },
     )))
 }

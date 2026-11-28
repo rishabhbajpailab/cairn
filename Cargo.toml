@@ -5,12 +5,15 @@ members = [
     "crates/cairn-http",
     "crates/cairn-store",
     "crates/cairn-plugins",
+    "crates/cairn-plugins-embedded",
     "crates/cairn-scheduler",
     "crates/cairn-gc",
     "crates/cairn-app",
     "crates/cairn-gateway-core",
     "workers/api",
     "workers/gateway",
+    "hosts/server",
+    "hosts/gateway",
 ]
 
 [workspace.package]
@@ -24,6 +27,7 @@ cairn-domain = { path = "crates/cairn-domain" }
 cairn-http = { path = "crates/cairn-http" }
 cairn-store = { path = "crates/cairn-store" }
 cairn-plugins = { path = "crates/cairn-plugins" }
+cairn-plugins-embedded = { path = "crates/cairn-plugins-embedded" }
 cairn-scheduler = { path = "crates/cairn-scheduler" }
 cairn-gc = { path = "crates/cairn-gc" }
 cairn-app = { path = "crates/cairn-app" }
@@ -38,6 +42,11 @@ getrandom04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
 include_dir = "0.7"
 wasm-bindgen = "0.2"
 
+# VPS hosts only (hosts/*, ADR 0014). Never depended on by libraries or workers.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2"] }
+tower-http = { version = "0.6", features = ["fs"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
 # web (no tokio runtime: must compile to wasm32)
 axum = { version = "0.8", default-features = false, features = ["json", "macros", "query"] }
 tower-service = "0.3"
@@ -49,10 +58,11 @@ toml = "0.9"
 chrono = { version = "0.4", features = ["serde", "wasmbind"] }
 chrono-tz = "0.10"
 ulid = { version = "3", features = ["serde"] }
-jsonschema = { version = "0.33", default-features = false }  # no resolve-http/file: wasm-safe
+jsonschema = { version = "0.63", default-features = false }  # no resolve-http/file: wasm-safe
 sha2 = "0.10"
 hex = "0.4"
 base64 = "0.22"
+ciborium = "0.2"   # SurrealDB /rpc wire format (exact types; JSON coerces strings)
 cron = "0.17"
 ed25519-dalek = "2"
 
@@ -66,6 +76,7 @@ tokio = { version = "1", features = ["macros", "rt", "sync"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 rusqlite = { version = "0.37", features = ["bundled"] }
+ureq = "3"   # live SurrealDB test only (crates/cairn-store/tests/live_surreal.rs)
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

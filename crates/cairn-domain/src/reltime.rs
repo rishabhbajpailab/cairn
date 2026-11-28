@@ -2,7 +2,7 @@
 //! `-24h`, `+2d`, `30d` (unsigned = duration), `90m`, `2w`. Resolved against an explicit
 //! `now` so dry-runs and tests are deterministic.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -69,13 +69,31 @@ mod tests {
 /// Resolve signed relative-time strings inside query values (`"+2d"` → RFC 3339). Other values
 /// pass through unchanged. Used by every Store implementation so where-clauses agree.
 pub fn resolve_json(v: &serde_json::Value, now: DateTime<Utc>) -> serde_json::Value {
-    if let serde_json::Value::String(s) = v
-        && (s.starts_with('+') || s.starts_with('-'))
-        && let Ok(d) = parse_span(s)
-    {
-        return serde_json::Value::String((now + d).to_rfc3339());
+    if let serde_json::Value::String(s) = v {
+        if (s.starts_with('+') || s.starts_with('-'))
+            && let Ok(d) = parse_span(s)
+        {
+            return serde_json::Value::String(canonical(now + d));
+        }
+        return canonical_json(v);
     }
     v.clone()
+}
+
+/// The one datetime format stored in `idx` and used in comparisons: UTC, millisecond
+/// precision, `Z` suffix, fixed width (`2026-01-01T09:30:00.000Z`). Datetimes are stored as
+/// strings (the SurrealDB wire format keeps strings as strings), so a fixed width is what makes
+/// lexicographic order match time order, in SurrealDB and in `MemStore` alike.
+pub fn canonical(t: DateTime<Utc>) -> String {
+    t.to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+/// [`canonical`] for an RFC 3339 string value; anything else is returned unchanged.
+pub fn canonical_json(v: &serde_json::Value) -> serde_json::Value {
+    match v.as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok()) {
+        Some(t) => serde_json::Value::String(canonical(t.with_timezone(&Utc))),
+        None => v.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -88,5 +106,18 @@ mod json_tests {
         assert!(resolve_json(&serde_json::json!("+2d"), now).as_str().unwrap().contains('T'));
         assert_eq!(resolve_json(&serde_json::json!("2d"), now), serde_json::json!("2d"));
         assert_eq!(resolve_json(&serde_json::json!(3), now), serde_json::json!(3));
+        assert_eq!(resolve_json(&serde_json::json!("note:abc"), now), serde_json::json!("note:abc"));
+    }
+
+    #[test]
+    fn canonical_datetimes_sort_lexicographically() {
+        let a = canonical_json(&serde_json::json!("2026-01-01T10:00:00+02:00"));
+        let b = canonical_json(&serde_json::json!("2026-01-01T08:00:00.5Z"));
+        let c = canonical_json(&serde_json::json!("2026-01-01T08:00:01Z"));
+        assert_eq!(a, serde_json::json!("2026-01-01T08:00:00.000Z"));
+        assert_eq!(b, serde_json::json!("2026-01-01T08:00:00.500Z"));
+        assert!(a.as_str() < b.as_str() && b.as_str() < c.as_str());
+        let now = DateTime::parse_from_rfc3339("2026-01-01T08:00:00Z").unwrap().with_timezone(&Utc);
+        assert_eq!(resolve_json(&serde_json::json!("+1h"), now), serde_json::json!("2026-01-01T09:00:00.000Z"));
     }
 }

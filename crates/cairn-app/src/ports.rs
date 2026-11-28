@@ -21,7 +21,7 @@ pub struct CaptureMsg {
     pub error: Option<String>,
 }
 
-/// Durable spool for raw captures (Cloudflare Queue). Invariant 1: once `enqueue` returns Ok,
+/// Durable spool for raw captures (SQLite on the VPS; a Queue on the legacy Workers). Invariant 1: once `enqueue` returns Ok,
 /// the capture will reach the store even if the database is paused or unreachable.
 #[async_trait]
 pub trait Spool: Send + Sync {

@@ -117,3 +117,44 @@ impl HttpTransport for FakeTransport {
             .ok_or_else(|| HttpError::Network("FakeTransport: no canned response left".into()))
     }
 }
+
+/// Native transport for the VPS binaries (`hosts/*`), behind the `reqwest` feature so the
+/// Worker builds never pull it in.
+#[cfg(feature = "reqwest")]
+pub mod native {
+    use super::*;
+
+    #[derive(Clone)]
+    pub struct ReqwestTransport(reqwest::Client);
+
+    impl ReqwestTransport {
+        /// `timeout` bounds the whole request. Pick it per upstream: model calls are slow.
+        pub fn new(timeout: std::time::Duration) -> Result<Self, HttpError> {
+            reqwest::Client::builder()
+                .timeout(timeout)
+                .user_agent(concat!("cairn/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .map(Self)
+                .map_err(|e| HttpError::Network(e.to_string()))
+        }
+    }
+
+    #[async_trait]
+    impl HttpTransport for ReqwestTransport {
+        async fn send(&self, req: HttpRequest) -> Result<HttpResponse, HttpError> {
+            let method =
+                reqwest::Method::from_bytes(req.method.as_bytes()).map_err(|e| HttpError::Encode(e.to_string()))?;
+            let mut b = self.0.request(method, &req.url);
+            for (k, v) in &req.headers {
+                b = b.header(k, v);
+            }
+            if let Some(body) = req.body {
+                b = b.body(body);
+            }
+            let resp = b.send().await.map_err(|e| HttpError::Network(e.to_string()))?;
+            let status = resp.status().as_u16();
+            let body = resp.bytes().await.map_err(|e| HttpError::Network(e.to_string()))?.to_vec();
+            Ok(HttpResponse { status, body })
+        }
+    }
+}

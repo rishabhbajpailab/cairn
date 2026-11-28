@@ -40,10 +40,10 @@ retain_runs: 30d                # GC policy for this task's task-run items
 
 ## How tasks run
 
-- **Scheduler Durable Object.** It keeps one alarm set to the earliest upcoming cron fire time (or pending reminder). When the alarm fires, it puts a `TaskFire { task, at }` on the **TASKS queue** for each cron firing in `(last_tick, now]`, then re-arms. There's no polling.
+- **Scheduler timer** (in `cairn`). It sleeps until the earliest upcoming cron fire time or pending reminder (at most an hour). When it wakes, it puts a `TaskFire { task, at }` on the spool's **tasks** queue for each cron firing in `(last_tick, now]`, then recomputes. There's no polling.
 - **`after:` chaining.** When a run succeeds, the runner enqueues fires for its dependents (M5).
 - **Event triggers** (`on: item.created`). The capture consumer enqueues fires for matching tasks (M5).
-- **TASKS consumer** (M5):
+- **Tasks consumer** (M5, the spool's `tasks` queue):
   1. computes the run key, and skips the fire if a run with that key already succeeded
   2. resolves the input query
   3. splits it into chunks according to `fanout` and calls the gateway once per chunk, at most `concurrency` at a time

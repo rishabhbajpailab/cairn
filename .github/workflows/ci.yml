@@ -14,9 +14,17 @@ jobs:
       # Invariant 5: only the gateway talks to OpenRouter / AI Gateway.
       - name: upstream isolation
         run: |
-          if grep -rIl -e "openrouter.ai" -e "gateway.ai.cloudflare.com" -e "cf-aig-authorization" crates workers --include=*.rs \
-             | grep -v -e "^crates/cairn-gateway-core/" -e "^workers/gateway/"; then
+          if grep -rIl -e "openrouter.ai" -e "gateway.ai.cloudflare.com" -e "cf-aig-authorization" crates workers hosts --include=*.rs \
+             | grep -v -e "^crates/cairn-gateway-core/" -e "^workers/gateway/" -e "^hosts/gateway/"; then
             echo "LLM upstream referenced outside the gateway"; exit 1; fi
+      # Invariant 5 on the VPS: only the gateway binary may link the gateway core, and it
+      # must not link the store.
+      - name: host isolation
+        run: |
+          if cargo tree -p cairn-server -e normal | grep -q cairn-gateway-core; then
+            echo "cairn-server depends on cairn-gateway-core"; exit 1; fi
+          if cargo tree -p cairn-gateway-server -e normal | grep -q -e cairn-store -e cairn-app; then
+            echo "cairn-gateway-server can reach the main database"; exit 1; fi
       # Invariant 6: the API Worker must never bind the ledger or the key.
       - name: gateway isolation
         run: |
@@ -34,6 +42,37 @@ jobs:
       - run: cargo install -q worker-build
       - run: cd workers/gateway && worker-build --release
       - run: cd workers/api && worker-build --release
+
+  # The VPS images (ADR 0014). Built, not pushed.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker buildx build --target cairn -t cairn:ci --load .
+      - run: docker buildx build --target gateway -t cairn-gateway:ci --load .
+      - name: gateway image has no cairn binary, and vice versa
+        run: |
+          ! docker run --rm --entrypoint sh cairn-gateway:ci -c 'test -e /usr/local/bin/cairn'
+          ! docker run --rm --entrypoint sh cairn:ci -c 'test -e /usr/local/bin/cairn-gateway'
+      - run: for f in cairn gateway sign-in; do cp deploy/$f.env.example deploy/$f.env; done && docker compose config -q
+      - name: network boundaries (ADR 0014, 0015)
+        run: |
+          docker compose -f compose.yaml -f compose.eoc.yaml config --format json > merged.json
+          docker compose config --format json > standalone.json
+          python3 -c "
+          import json
+          m = json.load(open('merged.json'))['services']; s = json.load(open('standalone.json'))['services']
+          net = lambda d, n: set(d[n].get('networks', {}))
+          # Only the sign-in faces the door; cairn only reaches the index; the gateway no EoC network.
+          assert net(m, 'cairn-sign-in') == {'default', 'eoc-door'}, net(m, 'cairn-sign-in')
+          assert net(m, 'cairn') == {'default', 'gateway', 'eoc-index'}, net(m, 'cairn')
+          assert net(m, 'cairn-gateway') == {'gateway', 'gateway-egress'}, net(m, 'cairn-gateway')
+          # Nothing published when sharing EoC; standalone publishes only the sign-in, on loopback.
+          assert not any(v.get('ports') for v in m.values()), 'published with EoC'
+          pub = {n: v['ports'] for n, v in s.items() if v.get('ports')}
+          assert list(pub) == ['cairn-sign-in'] and all(p['host_ip'] == '127.0.0.1' for p in pub['cairn-sign-in']), pub
+          "
 
   web:
     runs-on: ubuntu-latest

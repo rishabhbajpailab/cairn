@@ -1,6 +1,6 @@
-# cairn-gateway caps. Committed and compiled INTO the gateway Worker at build time, so there
-# is no runtime path that can change them: raising a limit means editing this file and running
-# `wrangler deploy` with your Cloudflare credentials (which the app never holds).
+# cairn-gateway caps. Committed and compiled INTO the gateway binary at build time, so there
+# is no runtime path that can change them: raising a limit means editing this file and
+# rebuilding the gateway container on the host (`docker compose up -d --build cairn-gateway`).
 # See docs/spend-control.md.
 #
 # Model slugs and prices are placeholders: verify against https://openrouter.ai/models

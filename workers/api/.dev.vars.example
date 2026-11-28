@@ -3,5 +3,6 @@ CAIRN_TOKENS="phone:capture:<sha256>;ui:write:<sha256>;me:admin:<sha256>"
 SURREAL_URL=http://127.0.0.1:8000
 SURREAL_USER=root
 SURREAL_PASS=root
+SURREAL_AUTH_LEVEL=root   # local `make db` uses root; production is a database-level user
 DISCORD_PUBLIC_KEY=
 DISCORD_BOT_TOKEN=

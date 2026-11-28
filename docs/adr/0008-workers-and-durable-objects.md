@@ -1,6 +1,6 @@
 # 0008: Cloudflare Workers + Durable Objects as the runtime
 
-- **Status:** accepted (supersedes 0002)
+- **Status:** accepted (supersedes 0002); superseded by 0014 (self-hosted VPS)
 - **Date:** 2026-11-23
 
 ## Context
